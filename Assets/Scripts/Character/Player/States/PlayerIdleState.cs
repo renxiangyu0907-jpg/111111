@@ -26,8 +26,8 @@ namespace GhostVeil.Character.Player
         public override void Enter(PlayerController ctx)
         {
             // 刚着地时可能还残留微小水平速度，由 LogicUpdate 的平滑减速自然归零
-            // 如果需要立即播放 Idle 动画：
-            // ctx.SpineBridge?.PlayAnimation(0, "idle", true);
+            // 播放 Idle 动画（循环）—— Animator 为 null 时安全跳过
+            ctx.Animator?.PlayAnim("idle", true);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────

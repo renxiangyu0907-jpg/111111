@@ -28,6 +28,7 @@ using GhostVeil.Data;
 using GhostVeil.Data.ScriptableObjects;
 using GhostVeil.Physics;
 using GhostVeil.Input;
+using GhostVeil.Animation.Spine;
 
 namespace GhostVeil.Character.Player
 {
@@ -62,6 +63,12 @@ namespace GhostVeil.Character.Player
 
         /// <summary>状态机只读访问（供 Debug UI 显示当前状态）</summary>
         public StateMachine<PlayerController> StateMachine => _stateMachine;
+
+        /// <summary>
+        /// Spine 动画控制器（供状态调用 PlayAnim / SetFaceDirection）。
+        /// 可为 null —— 未挂 SpineAnimator 时角色逻辑照常运行，只是没有动画。
+        /// </summary>
+        public SpineAnimator Animator { get; private set; }
 
         // ══════════════════════════════════════════════
         //  跳跃缓冲 (Jump Buffer)
@@ -138,8 +145,12 @@ namespace GhostVeil.Character.Player
                 }
             }
 
-            // Spine 桥接（此阶段可为空，后续接入）
-            // spineBridge = GetComponent<ISpineBridge>() as ISpineBridge;
+            // ── 3. Spine 动画（可选，找不到不报错） ────────────
+            Animator = GetComponent<SpineAnimator>();
+            if (Animator == null)
+                Animator = GetComponentInChildren<SpineAnimator>();
+            // 同时填充基类的接口引用，保持一致性
+            spineBridge = Animator;
 
             // ── 安全检查（Error 级别，不会被 strip 掉） ──────────
             if (RaycastCtrl == null)
@@ -324,12 +335,16 @@ namespace GhostVeil.Character.Player
 
         /// <summary>
         /// 根据水平输入翻转角色朝向。
+        /// 同时同步 Spine 骨骼的 ScaleX 翻转。
         /// </summary>
         public void UpdateFacing()
         {
             float h = Input.HorizontalInput;
             if (h > 0.01f) SetFacing(FacingDirection.Right);
             else if (h < -0.01f) SetFacing(FacingDirection.Left);
+
+            // 同步 Spine 骨骼翻转
+            Animator?.SetFaceDirection(Facing);
         }
 
         /// <summary>

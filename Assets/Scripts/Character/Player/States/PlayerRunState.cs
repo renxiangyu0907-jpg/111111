@@ -26,7 +26,8 @@ namespace GhostVeil.Character.Player
         // ── 进入 ──────────────────────────────────────
         public override void Enter(PlayerController ctx)
         {
-            // ctx.SpineBridge?.PlayAnimation(0, "run", true);
+            // 播放 Run 动画（循环）
+            ctx.Animator?.PlayAnim("run", true);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────

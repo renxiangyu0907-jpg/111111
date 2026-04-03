@@ -33,7 +33,8 @@ namespace GhostVeil.Character.Player
             // 清除郊狼时间，防止在空中二次利用
             ctx.CoyoteTimer = 0f;
 
-            // ctx.SpineBridge?.PlayAnimation(0, "jump_rise", false);
+            // 播放跳跃上升动画（不循环，播完保持最后一帧）
+            ctx.Animator?.PlayAnim("jump_rise", false);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────
