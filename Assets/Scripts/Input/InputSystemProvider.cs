@@ -53,6 +53,7 @@ namespace GhostVeil.Input
     ///   ✘ 不做跳跃缓冲 / 土狼时间 / 连击判定 — 那些是 Controller 的事
     /// </summary>
     [DisallowMultipleComponent]
+    [DefaultExecutionOrder(-100)] // 确保在 PlayerController 之前初始化
     public class InputSystemProvider : MonoBehaviour, IInputProvider,
                                        GhostVeilInputActions.IGameplayActions
     {

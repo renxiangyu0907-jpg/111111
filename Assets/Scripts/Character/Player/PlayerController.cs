@@ -108,7 +108,8 @@ namespace GhostVeil.Character.Player
         // ══════════════════════════════════════════════
 
         /// <summary>SmoothDamp 内部使用的参考速度（不要手动修改）</summary>
-        public float HorizontalSmoothVelocity { get; set; }
+        [System.NonSerialized]
+        public float HorizontalSmoothVelocity;
 
         // ══════════════════════════════════════════════
         //  CharacterController2D 抽象方法实现
@@ -116,28 +117,37 @@ namespace GhostVeil.Character.Player
 
         protected override void GatherDependencies()
         {
-            // 获取同 GameObject 上的组件（射线控制器）
+            // ── 1. 射线控制器（必须在同一 GameObject 上） ──────
             RaycastCtrl = GetComponent<PlayerRaycastController>();
             raycastController = RaycastCtrl;
 
-            // 获取输入源（同物体 或 场景中搜索）
-            inputProvider = GetComponent<IInputProvider>() as IInputProvider;
-            if (inputProvider == null)
+            // ── 2. 输入源 ──────────────────────────────────────
+            //    优先从同物体找具体类型（接口 GetComponent 在某些 Unity 版本不可靠）
+            var localProvider = GetComponent<InputSystemProvider>();
+            if (localProvider != null)
             {
-                var provider = FindObjectOfType<InputSystemProvider>();
-                inputProvider = provider;
+                inputProvider = localProvider;
+            }
+            else
+            {
+                // 不在同一物体上 → 全场景搜索
+                var sceneProvider = FindObjectOfType<InputSystemProvider>();
+                if (sceneProvider != null)
+                {
+                    inputProvider = sceneProvider;
+                }
             }
 
             // Spine 桥接（此阶段可为空，后续接入）
             // spineBridge = GetComponent<ISpineBridge>() as ISpineBridge;
 
-            // 安全检查
-            Debug.Assert(RaycastCtrl != null,
-                "[PlayerController] PlayerRaycastController not found!", this);
-            Debug.Assert(inputProvider != null,
-                "[PlayerController] IInputProvider not found!", this);
-            Debug.Assert(moveData != null,
-                "[PlayerController] PlayerMovementData not assigned!", this);
+            // ── 安全检查（Error 级别，不会被 strip 掉） ──────────
+            if (RaycastCtrl == null)
+                Debug.LogError("[PlayerController] 找不到 PlayerRaycastController！请确认已挂在同一 GameObject 上。", this);
+            if (inputProvider == null)
+                Debug.LogError("[PlayerController] 找不到 IInputProvider！请确认 InputSystemProvider 已挂在 Player 或场景中的某个 GameObject 上。", this);
+            if (moveData == null)
+                Debug.LogError("[PlayerController] PlayerMovementData 未赋值！请在 Inspector 中拖入 MoveData 资产。", this);
         }
 
         protected override void RegisterStates()
@@ -160,6 +170,10 @@ namespace GhostVeil.Character.Player
 
         protected override void OnLogicUpdate(float deltaTime)
         {
+            // ── 安全守卫：任何核心依赖缺失时跳过整个逻辑帧 ──
+            if (inputProvider == null || moveData == null || raycastController == null)
+                return;
+
             // ── Step 1: 更新辅助计时器 ──────────────────
 
             // 跳跃缓冲：每帧衰减，按下跳跃键时重置
