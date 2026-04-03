@@ -5,40 +5,33 @@
 // ┌──────────────────────────────────────────────────────────────────────────┐
 // │  数据流：                                                                │
 // │                                                                          │
-// │  New Input System (硬件层)                                               │
-// │       │                                                                  │
-// │       ▼                                                                  │
-// │  GhostVeilInputActions (Generated C# Wrapper)                           │
-// │       │  IGameplayActions 回调                                           │
-// │       ▼                                                                  │
-// │  InputSystemProvider (本类)                                              │
-// │       │  ① 更新轴数据 (MoveVector)                                      │
-// │       │  ② 设置帧标记 (JumpPressed = true)                              │
-// │       │  ③ 触发事件   (OnJumpPressed?.Invoke)                           │
-// │       │  ④ LateUpdate 清零帧标记                                        │
-// │       ▼                                                                  │
-// │  IInputProvider 接口                                                     │
-// │       │                                                                  │
-// │  ┌────┴────────────┐                                                     │
-// │  │ 状态机          │  ← LogicUpdate 中读 bool 标记                       │
-// │  │ (PlayerController)                                                    │
-// │  └────┬────────────┘                                                     │
-// │       │                                                                  │
-// │  ┌────┴────────────┐                                                     │
-// │  │ UI / 音效       │  ← 订阅 event 回调                                  │
-// │  └─────────────────┘                                                     │
+// │  Input System Runtime                                                    │
+// │    │  (硬件事件 → InputAction callback)                                  │
+// │    ▼                                                                     │
+// │  IGameplayActions 回调方法                                               │
+// │    │  OnMove / OnJump / OnAttack / ...                                   │
+// │    │  在回调中：                                                          │
+// │    │    · 更新持续量（_rawMoveVector）                                    │
+// │    │    · 置位帧标记（_jumpPressedFlag = true）                           │
+// │    │    · 触发事件（OnJumpPressed?.Invoke()）                             │
+// │    ▼                                                                     │
+// │  MonoBehaviour.Update() — LateUpdate 之前                                │
+// │    │  (什么都不做 — 标记在回调中已经置位)                                  │
+// │    ▼                                                                     │
+// │  状态机 LogicUpdate 读取                                                 │
+// │    │  provider.JumpPressed  → 读到 true（本帧刚按下）                    │
+// │    │  provider.MoveVector   → 读到当前摇杆值                             │
+// │    ▼                                                                     │
+// │  MonoBehaviour.LateUpdate()                                              │
+// │    │  清零所有帧标记（_jumpPressedFlag = false ...）                      │
+// │    │  这样下一帧如果没有新回调，标记就是 false                             │
+// │    ▼                                                                     │
+// │  下一帧...                                                               │
 // │                                                                          │
-// │  帧标记生命周期：                                                         │
-// │                                                                          │
-// │  ── frame N ──────────────────────── frame N+1 ──────                    │
-// │  Input callback → JumpPressed=true   LateUpdate → JumpPressed=false     │
-// │                   Event 触发          (清零，仅存活一帧)                  │
-// │                   状态机可读 true                                         │
-// │                                                                          │
-// │  为什么用 LateUpdate 清零？                                               │
-// │    · Update 中状态机的 LogicUpdate 已经执行完毕                           │
-// │    · LateUpdate 在所有 Update 之后执行                                   │
-// │    · 保证同一帧内所有消费者都能读到 true                                  │
+// │  InputLocked = true 时：                                                 │
+// │    · 所有属性返回零值 / false                                             │
+// │    · 回调中不触发外部事件、不置位帧标记                                    │
+// │    · 但 Input System 回调仍在运行（保持内部状态同步）                      │
 // └──────────────────────────────────────────────────────────────────────────┘
 
 using System;
@@ -48,72 +41,72 @@ using UnityEngine.InputSystem;
 namespace GhostVeil.Input
 {
     /// <summary>
-    /// IInputProvider 的生产环境实现。
+    /// IInputProvider 的正式实现 —— 对接 New Input System 的 Generated C# Class。
     /// 
-    /// 核心设计：
-    ///   · 实现 IGameplayActions 回调接口，由 GhostVeilInputActions 驱动。
-    ///   · 帧标记（JumpPressed 等）在回调中置 true，在 LateUpdate 中清零。
-    ///   · InputLocked 为 true 时，所有输出归零、事件不触发。
-    ///   · 此类只做"采集 + 转发"，不包含任何游戏逻辑
-    ///     （跳跃缓冲、土狼时间等由 Controller / State 处理）。
+    /// 挂载方式：挂到场景中一个持久 GameObject 上（如 "InputManager"），
+    ///           或由 PlayerController 在 Awake 中 AddComponent。
+    /// 
+    /// 职责边界：
+    ///   ✔ 捕获原始输入并暴露为属性 + 事件
+    ///   ✔ 帧标记的自动置位与清零
+    ///   ✔ InputLocked 全局锁
+    ///   ✘ 不做跳跃缓冲 / 土狼时间 / 连击判定 — 那些是 Controller 的事
     /// </summary>
-    [DefaultExecutionOrder(-100)] // 确保在所有游戏逻辑之前执行
-    public class InputSystemProvider : MonoBehaviour, IInputProvider, GhostVeilInputActions.IGameplayActions
+    [DisallowMultipleComponent]
+    public class InputSystemProvider : MonoBehaviour, IInputProvider,
+                                       GhostVeilInputActions.IGameplayActions
     {
         // ══════════════════════════════════════════════
         //  Inspector 配置
         // ══════════════════════════════════════════════
 
-        [Header("=== 下方向判定 ===")]
-        [Tooltip("垂直轴低于此阈值时视为"按住下"（用于下+跳穿透单向平台）")]
-        [SerializeField, Range(-1f, 0f)] private float _downThreshold = -0.5f;
+        [Header("=== 下方向阈值 ===")]
+        [Tooltip("垂直轴低于此值视为"按住下"（用于下+跳穿透单向平台）")]
+        [SerializeField, Range(-1f, 0f)]
+        private float _downThreshold = -0.5f;
 
         // ══════════════════════════════════════════════
-        //  Input Actions 实例
+        //  内部状态
         // ══════════════════════════════════════════════
 
-        private GhostVeilInputActions _inputActions;
+        // ── Generated Class 实例 ────────────────────
+        private GhostVeilInputActions _actions;
 
-        // ══════════════════════════════════════════════
-        //  内部帧标记存储
-        // ══════════════════════════════════════════════
-        //
-        //  为什么用独立的 backing field？
-        //  · 接口属性只暴露 get，内部需要写入
-        //  · InputLocked 为 true 时 get 统一返回 false，
-        //    但 backing field 仍然记录真实状态（解锁后立刻恢复）
+        // ── 持续量（每帧持续有效，由 performed/canceled 更新） ──
+        private Vector2 _rawMoveVector;
+        private bool _jumpHeldRaw;
 
-        private Vector2 _moveVector;
+        // ── 帧标记（仅触发帧为 true，LateUpdate 清零） ──
+        //    用 "Flag" 后缀的私有字段存储原始标记，
+        //    公开属性在 InputLocked 时返回 false。
+        private bool _jumpPressedFlag;
+        private bool _jumpReleasedFlag;
+        private bool _attackPressedFlag;
+        private bool _dashPressedFlag;
+        private bool _interactPressedFlag;
 
-        private bool _jumpPressed;
-        private bool _jumpReleased;
-        private bool _jumpHeld;
-
-        private bool _attackPressed;
-        private bool _dashPressed;
-        private bool _interactPressed;
-        private bool _pausePressed; // 内部暂存，通过事件对外
+        // ── 输入锁 ─────────────────────────────────
+        private bool _inputLocked;
 
         // ══════════════════════════════════════════════
         //  IInputProvider — 轴 / 向量
         // ══════════════════════════════════════════════
 
-        public float HorizontalInput => InputLocked ? 0f : _moveVector.x;
-        public float VerticalInput   => InputLocked ? 0f : _moveVector.y;
-        public Vector2 MoveVector    => InputLocked ? Vector2.zero : _moveVector;
+        public float HorizontalInput => _inputLocked ? 0f : _rawMoveVector.x;
+        public float VerticalInput   => _inputLocked ? 0f : _rawMoveVector.y;
+        public Vector2 MoveVector    => _inputLocked ? Vector2.zero : _rawMoveVector;
 
         // ══════════════════════════════════════════════
         //  IInputProvider — 帧标记
         // ══════════════════════════════════════════════
 
-        public bool JumpPressed     => !InputLocked && _jumpPressed;
-        public bool JumpReleased    => !InputLocked && _jumpReleased;
-        public bool JumpHeld        => !InputLocked && _jumpHeld;
-        public bool AttackPressed   => !InputLocked && _attackPressed;
-        public bool DashPressed     => !InputLocked && _dashPressed;
-        public bool InteractPressed => !InputLocked && _interactPressed;
-
-        public bool DownHeld        => !InputLocked && (_moveVector.y < _downThreshold);
+        public bool JumpPressed     => !_inputLocked && _jumpPressedFlag;
+        public bool JumpReleased    => !_inputLocked && _jumpReleasedFlag;
+        public bool JumpHeld        => !_inputLocked && _jumpHeldRaw;
+        public bool AttackPressed   => !_inputLocked && _attackPressedFlag;
+        public bool DashPressed     => !_inputLocked && _dashPressedFlag;
+        public bool InteractPressed => !_inputLocked && _interactPressedFlag;
+        public bool DownHeld        => !_inputLocked && (_rawMoveVector.y < _downThreshold);
 
         // ══════════════════════════════════════════════
         //  IInputProvider — 事件
@@ -127,26 +120,21 @@ namespace GhostVeil.Input
         public event Action OnPausePressed;
 
         // ══════════════════════════════════════════════
-        //  IInputProvider — 输入锁定
+        //  IInputProvider — 输入锁
         // ══════════════════════════════════════════════
-
-        private bool _inputLocked;
 
         public bool InputLocked
         {
             get => _inputLocked;
             set
             {
-                if (_inputLocked == value) return;
                 _inputLocked = value;
 
-                // 锁定时立即清除所有残留帧标记和轴数据，
-                // 防止"锁定前一帧按下的按钮"在锁定后仍被读取到
-                if (_inputLocked)
+                // 锁定瞬间立即清空所有残留标记，
+                // 防止锁定前一帧的 Pressed 在下一帧被状态机读到。
+                if (value)
                 {
-                    ClearAllFrameFlags();
-                    _moveVector = Vector2.zero;
-                    _jumpHeld = false;
+                    ClearAllFlags();
                 }
             }
         }
@@ -157,180 +145,149 @@ namespace GhostVeil.Input
 
         private void Awake()
         {
-            // 创建 InputActions 实例并注册回调
-            _inputActions = new GhostVeilInputActions();
-            _inputActions.Gameplay.SetCallbacks(this);
+            // 创建 Generated Class 实例并注册回调
+            _actions = new GhostVeilInputActions();
+            _actions.Gameplay.SetCallbacks(this);
         }
 
         private void OnEnable()
         {
-            // 启用 Gameplay Action Map
-            _inputActions.Gameplay.Enable();
+            _actions.Gameplay.Enable();
         }
 
         private void OnDisable()
         {
-            // 禁用 Gameplay Action Map
-            _inputActions.Gameplay.Disable();
+            _actions.Gameplay.Disable();
         }
 
         private void OnDestroy()
         {
-            // 释放 InputActionAsset 资源
-            _inputActions?.Dispose();
-            _inputActions = null;
+            // 释放 InputActionAsset，防止泄漏
+            _actions?.Dispose();
+            _actions = null;
         }
 
         /// <summary>
-        /// LateUpdate —— 在所有 Update 执行完毕后清零帧标记。
-        /// 这样可以保证：
-        ///   · 同一帧内所有 MonoBehaviour.Update 都能读到 JumpPressed = true
-        ///   · 下一帧的 Update 开始时，所有帧标记已被重置
+        /// LateUpdate 在所有 Update / 状态机 LogicUpdate 之后执行。
+        /// 此时状态机已经读取过本帧标记，可以安全清零。
+        /// 
+        /// 为什么不用 Update？
+        ///   Input System 的回调可能在 Update 之前或之间触发，
+        ///   如果在 Update 里清零，可能会在状态机读取之前就把标记清掉。
+        ///   LateUpdate 保证了：
+        ///     回调置位 → Update(状态机读取) → LateUpdate(清零)
         /// </summary>
         private void LateUpdate()
         {
-            ClearAllFrameFlags();
+            ClearAllFlags();
         }
 
         // ══════════════════════════════════════════════
         //  IGameplayActions 回调实现
         // ══════════════════════════════════════════════
         //
-        //  New Input System 的 CallbackContext 包含三个阶段：
-        //    · started    — 按键开始按下（刚接触，尚未达到 press threshold）
-        //    · performed  — 按键确认触发（超过阈值 / 完成 interaction）
-        //    · canceled   — 按键释放
+        //  New Input System 回调的三个阶段：
+        //    · started   — 按键刚开始（手指接触，尚未达到阈值）
+        //    · performed — 按键确认触发（达到阈值 / 满足 Interaction 条件）
+        //    · canceled  — 按键释放
         //
-        //  对于 Button 类型：
-        //    performed = 按下   → 设置 Pressed 标记 + 触发 event
-        //    canceled  = 松开   → 设置 Released 标记 + 清除 Held
+        //  对于 Button 类 Action：
+        //    performed = 按下瞬间
+        //    canceled  = 松开瞬间
         //
-        //  对于 Value 类型（Move）：
-        //    performed = 轴值变化 → 更新 _moveVector
-        //    canceled  = 回到零位 → _moveVector = zero
+        //  对于 Value<Vector2> 类 Action（Move）：
+        //    performed = 值发生变化且不为零
+        //    canceled  = 值回到零
 
-        // ── Move ──────────────────────────────────────
+        // ── Move ────────────────────────────────────
         public void OnMove(InputAction.CallbackContext context)
         {
-            // 直接读取 Vector2 值。
-            // canceled 时 ReadValue 自动返回 zero，无需特殊处理。
-            _moveVector = context.ReadValue<Vector2>();
+            // 无论是否锁定都更新内部原始值，
+            // 这样解锁后可以立即拿到当前真实输入，
+            // 而不是残留锁定前的旧值。
+            _rawMoveVector = context.ReadValue<Vector2>();
         }
 
-        // ── Jump ──────────────────────────────────────
+        // ── Jump ────────────────────────────────────
         public void OnJump(InputAction.CallbackContext context)
         {
             if (context.performed)
             {
-                _jumpPressed = true;
-                _jumpHeld = true;
+                _jumpHeldRaw = true;
 
-                if (!InputLocked)
-                    OnJumpPressed?.Invoke();
+                // 锁定时不置位帧标记、不触发事件
+                if (_inputLocked) return;
+
+                _jumpPressedFlag = true;
+                OnJumpPressed?.Invoke();
             }
             else if (context.canceled)
             {
-                _jumpReleased = true;
-                _jumpHeld = false;
+                _jumpHeldRaw = false;
 
-                if (!InputLocked)
-                    OnJumpReleased?.Invoke();
+                if (_inputLocked) return;
+
+                _jumpReleasedFlag = true;
+                OnJumpReleased?.Invoke();
             }
         }
 
-        // ── Attack ────────────────────────────────────
+        // ── Attack ──────────────────────────────────
         public void OnAttack(InputAction.CallbackContext context)
         {
-            if (context.performed)
-            {
-                _attackPressed = true;
+            if (!context.performed) return;
 
-                if (!InputLocked)
-                    OnAttackPressed?.Invoke();
-            }
+            if (_inputLocked) return;
+
+            _attackPressedFlag = true;
+            OnAttackPressed?.Invoke();
         }
 
-        // ── Dash ──────────────────────────────────────
+        // ── Dash ────────────────────────────────────
         public void OnDash(InputAction.CallbackContext context)
         {
-            if (context.performed)
-            {
-                _dashPressed = true;
+            if (!context.performed) return;
 
-                if (!InputLocked)
-                    OnDashPressed?.Invoke();
-            }
+            if (_inputLocked) return;
+
+            _dashPressedFlag = true;
+            OnDashPressed?.Invoke();
         }
 
-        // ── Interact ──────────────────────────────────
+        // ── Interact ────────────────────────────────
         public void OnInteract(InputAction.CallbackContext context)
         {
-            if (context.performed)
-            {
-                _interactPressed = true;
+            if (!context.performed) return;
 
-                if (!InputLocked)
-                    OnInteractPressed?.Invoke();
-            }
+            if (_inputLocked) return;
+
+            _interactPressedFlag = true;
+            OnInteractPressed?.Invoke();
         }
 
-        // ── Pause ─────────────────────────────────────
+        // ── Pause ───────────────────────────────────
         public void OnPause(InputAction.CallbackContext context)
         {
-            if (context.performed)
-            {
-                _pausePressed = true;
+            if (!context.performed) return;
 
-                // Pause 比较特殊：即使 InputLocked 也应该能暂停
-                // （玩家在过场中想暂停应该被允许）
-                // 如果你的设计不允许，把这行移到 if(!InputLocked) 内
-                OnPausePressed?.Invoke();
-            }
+            // Pause 是特殊的：即使 InputLocked 也触发。
+            // 理由：玩家在过场动画中也应该能按 Pause 打开菜单。
+            // 如果你的设计不需要此行为，加上 _inputLocked 检查即可。
+            OnPausePressed?.Invoke();
         }
 
         // ══════════════════════════════════════════════
         //  内部辅助
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 清除所有脉冲型帧标记。
-        /// 在 LateUpdate 和 InputLocked 置 true 时调用。
-        /// 注意：不清除 _jumpHeld（持续量）和 _moveVector（持续量）。
-        /// </summary>
-        private void ClearAllFrameFlags()
+        /// <summary>清除所有帧脉冲标记（不清除持续量和 held 状态）</summary>
+        private void ClearAllFlags()
         {
-            _jumpPressed    = false;
-            _jumpReleased   = false;
-            _attackPressed  = false;
-            _dashPressed    = false;
-            _interactPressed = false;
-            _pausePressed   = false;
+            _jumpPressedFlag    = false;
+            _jumpReleasedFlag   = false;
+            _attackPressedFlag  = false;
+            _dashPressedFlag    = false;
+            _interactPressedFlag = false;
         }
-
-        // ══════════════════════════════════════════════
-        //  公共辅助（供叙事系统 / 调试使用）
-        // ══════════════════════════════════════════════
-
-        /// <summary>
-        /// 切换 Action Map。
-        /// 例如进入 UI 菜单时切到 UI Map，退出后切回 Gameplay。
-        /// </summary>
-        public void SwitchToGameplay()
-        {
-            _inputActions.Gameplay.Enable();
-            // 未来扩展：_inputActions.UI.Disable();
-        }
-
-        public void SwitchToUI()
-        {
-            _inputActions.Gameplay.Disable();
-            // 未来扩展：_inputActions.UI.Enable();
-        }
-
-        /// <summary>
-        /// 获取底层 InputActions 实例的只读引用。
-        /// 用于需要直接访问 InputAction 的高级场景（如 Rebinding UI）。
-        /// </summary>
-        public GhostVeilInputActions RawActions => _inputActions;
     }
 }
