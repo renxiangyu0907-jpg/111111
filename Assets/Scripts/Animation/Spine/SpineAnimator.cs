@@ -143,7 +143,8 @@ namespace GhostVeil.Animation.Spine
             // ── 4. 查找 IK 约束（可选） ─────────────────
             if (!string.IsNullOrEmpty(aimIKConstraintName))
             {
-                _aimConstraint = _skeleton.FindIkConstraint(aimIKConstraintName);
+                // Spine 4.3: FindIkConstraint 已移除，改用 FindConstraint<IkConstraint>()
+                _aimConstraint = _skeleton.FindConstraint<IkConstraint>(aimIKConstraintName);
                 // 找不到也不报错 —— IK 是可选功能
                 if (_aimConstraint == null)
                     Debug.Log($"[SpineAnimator] IK 约束 \"{aimIKConstraintName}\" 未找到（可选功能，不影响运行）。");
@@ -231,7 +232,8 @@ namespace GhostVeil.Animation.Spine
 #if HAS_SPINE_UNITY
             if (_skeleton != null)
             {
-                _skeleton.ScaleX = baseScaleX * faceSign;
+                // Spine 4.3: Skeleton.ScaleX → Skeleton.Pose.ScaleX
+                _skeleton.Pose.ScaleX = baseScaleX * faceSign;
             }
 #endif
         }
@@ -292,9 +294,11 @@ namespace GhostVeil.Animation.Spine
             if (bone == null) return;
 
             Vector3 localPos = transform.InverseTransformPoint(_aimTarget);
-            bone.X = localPos.x;
-            bone.Y = localPos.y;
-            _aimConstraint.Mix = _aimMix;
+            // Spine 4.3: Bone.X/Y → Bone.Pose.X/Y
+            bone.Pose.X = localPos.x;
+            bone.Pose.Y = localPos.y;
+            // Spine 4.3: IkConstraint.Mix → IkConstraint.Pose.Mix
+            _aimConstraint.Pose.Mix = _aimMix;
 #endif
         }
 
@@ -387,7 +391,8 @@ namespace GhostVeil.Animation.Spine
             }
 
             _skeleton.SetSkin(combined);
-            _skeleton.SetSlotsToSetupPose();
+            // Spine 4.3: SetSlotsToSetupPose() → SetupPoseSlots()
+            _skeleton.SetupPoseSlots();
 
             // 通知 AnimationState 刷新附件
             _skeletonAnim.AnimationState.Apply(_skeleton);
@@ -414,7 +419,8 @@ namespace GhostVeil.Animation.Spine
             }
 
             currentSkin.AddSkin(additionalSkin);
-            _skeleton.SetSlotsToSetupPose();
+            // Spine 4.3: SetSlotsToSetupPose() → SetupPoseSlots()
+            _skeleton.SetupPoseSlots();
             _skeletonAnim.AnimationState.Apply(_skeleton);
 #endif
         }
@@ -426,16 +432,19 @@ namespace GhostVeil.Animation.Spine
 #if HAS_SPINE_UNITY
             if (_skeleton == null) return;
 
-            var constraint = _skeleton.FindIkConstraint(constraintName);
+            // Spine 4.3: FindIkConstraint() → FindConstraint<IkConstraint>()
+            var constraint = _skeleton.FindConstraint<IkConstraint>(constraintName);
             if (constraint == null) return;
 
             var bone = constraint.Target;
             if (bone == null) return;
 
             Vector3 localPos = transform.InverseTransformPoint(worldPosition);
-            bone.X = localPos.x;
-            bone.Y = localPos.y;
-            constraint.Mix = Mathf.Clamp01(mix);
+            // Spine 4.3: Bone.X/Y → Bone.Pose.X/Y
+            bone.Pose.X = localPos.x;
+            bone.Pose.Y = localPos.y;
+            // Spine 4.3: IkConstraint.Mix → IkConstraint.Pose.Mix
+            constraint.Pose.Mix = Mathf.Clamp01(mix);
 #endif
         }
 
@@ -447,12 +456,18 @@ namespace GhostVeil.Animation.Spine
             if (_skeletonAnim == null) return;
 
             var mpb = new MaterialPropertyBlock();
-            var renderer = _skeletonAnim.GetComponent<MeshRenderer>();
-            if (renderer == null) return;
+            // Spine 4.3: SkeletonAnimation 不再继承 SkeletonRenderer，
+            //             渲染器拆分为独立的 SkeletonRenderer 组件
+            var skRenderer = _skeletonAnim.GetComponent<SkeletonRenderer>();
+            if (skRenderer == null) skRenderer = GetComponent<SkeletonRenderer>();
+            if (skRenderer == null) return;
 
-            renderer.GetPropertyBlock(mpb);
+            var meshRenderer = skRenderer.GetComponent<MeshRenderer>();
+            if (meshRenderer == null) return;
+
+            meshRenderer.GetPropertyBlock(mpb);
             mpb.SetFloat(propertyName, value);
-            renderer.SetPropertyBlock(mpb);
+            meshRenderer.SetPropertyBlock(mpb);
 #endif
         }
 
@@ -462,12 +477,17 @@ namespace GhostVeil.Animation.Spine
             if (_skeletonAnim == null) return;
 
             var mpb = new MaterialPropertyBlock();
-            var renderer = _skeletonAnim.GetComponent<MeshRenderer>();
-            if (renderer == null) return;
+            // Spine 4.3: 渲染器拆分为独立的 SkeletonRenderer 组件
+            var skRenderer = _skeletonAnim.GetComponent<SkeletonRenderer>();
+            if (skRenderer == null) skRenderer = GetComponent<SkeletonRenderer>();
+            if (skRenderer == null) return;
 
-            renderer.GetPropertyBlock(mpb);
+            var meshRenderer = skRenderer.GetComponent<MeshRenderer>();
+            if (meshRenderer == null) return;
+
+            meshRenderer.GetPropertyBlock(mpb);
             mpb.SetColor(propertyName, value);
-            renderer.SetPropertyBlock(mpb);
+            meshRenderer.SetPropertyBlock(mpb);
 #endif
         }
 
