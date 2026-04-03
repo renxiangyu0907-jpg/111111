@@ -12,8 +12,10 @@ namespace GhostVeil.Data
     /// </summary>
     public struct CollisionInfo
     {
+        // ── 四向碰撞标记 ──────────────────────────────
         public bool Above, Below, Left, Right;
 
+        // ── 坡道数据 ────────────────────────────────
         /// <summary>当前站立面的法线（用于坡道判定）</summary>
         public Vector2 GroundNormal;
 
@@ -29,13 +31,26 @@ namespace GhostVeil.Data
         /// <summary>是否正在下降坡道</summary>
         public bool DescendingSlope;
 
+        // ── 碰撞体引用 ──────────────────────────────
         /// <summary>脚下的 Collider 引用（用于移动平台 / 材质查询）</summary>
         public Collider2D GroundCollider;
 
         /// <summary>触墙的 Collider 引用（用于墙壁滑行判定）</summary>
         public Collider2D WallCollider;
 
-        /// <summary>按位聚合的碰撞方向</summary>
+        // ── 单向平台 ────────────────────────────────
+        /// <summary>
+        /// 当前帧是否正在执行"下落穿透"单向平台。
+        /// 为 true 时垂直检测忽略 oneWayPlatform 层。
+        /// 由外部在 Move 之前置位，在穿透完成后（不再与平台重叠）自动清除。
+        /// </summary>
+        public bool FallingThroughPlatform;
+
+        // ── 移动方向记录（辅助坡道过渡） ────────────────
+        /// <summary>本帧原始移动方向符号（-1 / 0 / 1），水平</summary>
+        public int FaceDir;
+
+        // ── 按位聚合的碰撞方向 ──────────────────────
         public CollisionSide Sides
         {
             get
@@ -58,6 +73,8 @@ namespace GhostVeil.Data
             GroundNormal = Vector2.up;
             GroundCollider = null;
             WallCollider = null;
+            // 注意：FallingThroughPlatform 不在 Reset 中清除，
+            // 它由外部逻辑（计时器/重叠检测）控制生命周期。
         }
     }
 }
