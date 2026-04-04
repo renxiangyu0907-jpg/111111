@@ -6,7 +6,7 @@
 //   1. 延迟跟随 Player（记录 Player 位置历史，取若干帧前的位置作为目标）
 //   2. 悬浮动画（Sine 波上下浮动）
 //   3. 自主朝向（面向最近敌人，无敌人时跟随移动方向或 Player 朝向）
-//   4. 用代码生成占位无人机外观（矩形机体 + 圆形中心灯）
+//   4. 支持 Inspector 拖入 Sprite 作为外观；未赋值时用代码生成占位图
 //   5. 管理推进器粒子特效（DroneVFX 组件）
 //
 // 挂载方式：
@@ -40,6 +40,16 @@ namespace GhostVeil.Drone
 
         [Tooltip("上下浮动频率")]
         [SerializeField] private float hoverFrequency = 2f;
+
+        [Header("=== 外观 ===")]
+        [Tooltip("无人机 Sprite（从 Inspector 拖入图片）。留空则使用代码生成的占位图。")]
+        [SerializeField] private Sprite droneSprite;
+
+        [Tooltip("Sprite 缩放倍率（根据图片实际大小调整）")]
+        [SerializeField] private float spriteScale = 1f;
+
+        [Tooltip("Sprite 排序层级")]
+        [SerializeField] private int spriteSortingOrder = 5;
 
         [Header("=== 朝向 ===")]
         [Tooltip("搜索敌人的范围半径")]
@@ -248,22 +258,73 @@ namespace GhostVeil.Drone
         }
 
         // ══════════════════════════════════════════════
-        //  代码生成占位外观
+        //  外观创建（优先用 Inspector 拖入的 Sprite）
         // ══════════════════════════════════════════════
 
         private void CreateVisuals()
         {
-            // ── 机体（圆角矩形，用圆形 sprite 近似） ──
+            if (droneSprite != null)
+            {
+                // ════════════════════════════════════════
+                //  模式 A：使用用户提供的 Sprite 图片
+                // ════════════════════════════════════════
+                CreateSpriteVisuals();
+            }
+            else
+            {
+                // ════════════════════════════════════════
+                //  模式 B：代码生成占位图（无图片时的兜底）
+                // ════════════════════════════════════════
+                CreatePlaceholderVisuals();
+            }
+        }
+
+        /// <summary>
+        /// 使用 Inspector 中赋值的 Sprite 创建外观。
+        /// 
+        /// 导入步骤：
+        ///   1. 把 PNG/PSD 文件放到 Assets/ 下任意位置（推荐 Assets/Sprites/Drone/）
+        ///   2. 在 Unity 的 Project 窗口选中图片 → Inspector 面板设置：
+        ///      · Texture Type = Sprite (2D and UI)
+        ///      · Sprite Mode = Single（整张图一个 Sprite）
+        ///      · Pixels Per Unit = 根据你的图片大小设置
+        ///        （例如 128x128 的图，PPU=128 则在游戏中为 1 个 Unity 单位大小）
+        ///      · Filter Mode = Bilinear 或 Point（像素风选 Point）
+        ///      · 点击 Apply
+        ///   3. 在 Hierarchy 选中挂有 DroneController 的 GameObject（或 Prefab）
+        ///   4. 把图片从 Project 窗口拖到 Inspector 的 "Drone Sprite" 字段
+        ///   5. 调整 "Sprite Scale" 控制大小
+        /// </summary>
+        private void CreateSpriteVisuals()
+        {
+            var bodyObj = new GameObject("DroneBody");
+            bodyObj.transform.SetParent(transform, false);
+            bodyObj.transform.localPosition = Vector3.zero;
+            bodyObj.transform.localScale = Vector3.one * spriteScale;
+
+            _bodyRenderer = bodyObj.AddComponent<SpriteRenderer>();
+            _bodyRenderer.sprite = droneSprite;
+            _bodyRenderer.color = Color.white; // 不染色，保持原图颜色
+            _bodyRenderer.sortingOrder = spriteSortingOrder;
+
+            // 用 Sprite 模式时不需要代码生成的核心灯，
+            // 但保留 _coreLightRenderer 引用为 null，
+            // UpdateCoreLightPulse() 会自动跳过。
+            _coreLightRenderer = null;
+        }
+
+        /// <summary>代码生成的占位外观（无图片时兜底）</summary>
+        private void CreatePlaceholderVisuals()
+        {
+            // ── 机体（圆角矩形） ──
             var bodyObj = new GameObject("DroneBody");
             bodyObj.transform.SetParent(transform, false);
             bodyObj.transform.localPosition = Vector3.zero;
 
             _bodyRenderer = bodyObj.AddComponent<SpriteRenderer>();
             _bodyRenderer.sprite = CreateRoundedRectSprite(48, 28, 6);
-            _bodyRenderer.color = new Color(0.25f, 0.28f, 0.35f, 1f); // 深灰蓝金属色
+            _bodyRenderer.color = new Color(0.25f, 0.28f, 0.35f, 1f);
             _bodyRenderer.sortingOrder = 5;
-
-            // 设置合理大小
             bodyObj.transform.localScale = Vector3.one * 0.025f;
 
             // ── 中心能量灯 ──
@@ -273,23 +334,21 @@ namespace GhostVeil.Drone
 
             _coreLightRenderer = coreObj.AddComponent<SpriteRenderer>();
             _coreLightRenderer.sprite = CreateCircleSprite(24);
-            _coreLightRenderer.color = new Color(0f, 0.9f, 1f, 0.9f); // 青色发光
+            _coreLightRenderer.color = new Color(0f, 0.9f, 1f, 0.9f);
             _coreLightRenderer.sortingOrder = 6;
-
             coreObj.transform.localScale = Vector3.one * 0.012f;
 
-            // ── 上翼（小矩形） ──
+            // ── 上翼 ──
             CreateWing("TopWing", new Vector3(0f, 0.18f, 0f), new Vector3(0.02f, 0.006f, 1f),
                 new Color(0.35f, 0.38f, 0.45f));
             // ── 下翼 ──
             CreateWing("BottomWing", new Vector3(0f, -0.12f, 0f), new Vector3(0.015f, 0.005f, 1f),
                 new Color(0.35f, 0.38f, 0.45f));
 
-            // ── 天线（细线） ──
+            // ── 天线 ──
             var antennaObj = new GameObject("Antenna");
             antennaObj.transform.SetParent(transform, false);
             antennaObj.transform.localPosition = new Vector3(-0.1f, 0.2f, 0f);
-
             var antennaRen = antennaObj.AddComponent<SpriteRenderer>();
             antennaRen.sprite = CreateRectSprite(2, 12);
             antennaRen.color = new Color(0.5f, 0.55f, 0.6f);
@@ -300,10 +359,9 @@ namespace GhostVeil.Drone
             var antLightObj = new GameObject("AntennaLight");
             antLightObj.transform.SetParent(antennaObj.transform, false);
             antLightObj.transform.localPosition = new Vector3(0f, 7f, 0f);
-
             var antLightRen = antLightObj.AddComponent<SpriteRenderer>();
             antLightRen.sprite = CreateCircleSprite(8);
-            antLightRen.color = new Color(1f, 0.3f, 0.2f, 0.9f); // 红色小灯
+            antLightRen.color = new Color(1f, 0.3f, 0.2f, 0.9f);
             antLightRen.sortingOrder = 7;
         }
 

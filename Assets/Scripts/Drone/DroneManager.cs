@@ -32,6 +32,18 @@ namespace GhostVeil.Drone
         [Tooltip("生成无人机时的出场动画时间")]
         [SerializeField] private float spawnAnimDuration = 0.5f;
 
+        [Header("=== Prefab 模式（推荐） ===")]
+        [Tooltip("无人机 Prefab（已配置好 Sprite）。\n" +
+                 "留空则用代码动态创建（占位图模式）。\n\n" +
+                 "制作方法：\n" +
+                 "1. 在 Hierarchy 右键 → Create Empty\n" +
+                 "2. 挂上 DroneController 脚本\n" +
+                 "3. 把无人机图片拖到 Drone Sprite 字段\n" +
+                 "4. 调整 Sprite Scale\n" +
+                 "5. 拖到 Project 窗口变成 Prefab\n" +
+                 "6. 把 Prefab 拖到这里")]
+        [SerializeField] private GameObject dronePrefab;
+
         // ══════════════════════════════════════════════
         //  运行时
         // ══════════════════════════════════════════════
@@ -116,16 +128,32 @@ namespace GhostVeil.Drone
 
             int formationIndex = _activeDrones.Count;
 
-            // 创建 GameObject
-            var droneObj = new GameObject($"Drone_{formationIndex}_{droneType}");
-
             // 初始位置：拾取点或 Player 头顶
             Vector3 startPos = spawnPos ?? (_player.position + Vector3.up * 1.5f);
-            droneObj.transform.position = startPos;
 
-            // 添加控制器并初始化
-            var controller = droneObj.AddComponent<DroneController>();
-            controller.Initialize(_player, formationIndex);
+            DroneController controller;
+
+            if (dronePrefab != null)
+            {
+                // ══ Prefab 模式：用预制体实例化（已包含 Sprite） ══
+                var droneObj = Instantiate(dronePrefab, startPos, Quaternion.identity);
+                droneObj.name = $"Drone_{formationIndex}_{droneType}";
+
+                controller = droneObj.GetComponent<DroneController>();
+                if (controller == null)
+                    controller = droneObj.AddComponent<DroneController>();
+
+                controller.Initialize(_player, formationIndex);
+            }
+            else
+            {
+                // ══ 代码模式：动态创建（占位图） ══
+                var droneObj = new GameObject($"Drone_{formationIndex}_{droneType}");
+                droneObj.transform.position = startPos;
+
+                controller = droneObj.AddComponent<DroneController>();
+                controller.Initialize(_player, formationIndex);
+            }
 
             _activeDrones.Add(controller);
 
