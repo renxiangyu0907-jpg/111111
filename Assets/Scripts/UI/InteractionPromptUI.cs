@@ -21,6 +21,7 @@
 
 using UnityEngine;
 using GhostVeil.Core.Event;
+using GhostVeil.Interaction;
 
 namespace GhostVeil.UI
 {
@@ -159,7 +160,7 @@ namespace GhostVeil.UI
             }
 
             // ── 世界坐标 → 屏幕坐标 ────────────────────
-            Camera cam = Camera.main;
+            UnityEngine.Camera cam = UnityEngine.Camera.main;
             if (cam == null) return;
 
             Vector3 worldPos = _targetObject.transform.position + 
