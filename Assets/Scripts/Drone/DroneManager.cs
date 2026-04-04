@@ -257,7 +257,10 @@ namespace GhostVeil.Drone
             effectObj.transform.position = position;
 
             var ps = effectObj.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
             var main = ps.main;
+            main.playOnAwake = false;
             main.duration = 0.6f;
             main.startLifetime = 0.5f;
             main.startSpeed = 3f;
@@ -265,7 +268,6 @@ namespace GhostVeil.Drone
             main.startColor = new Color(0f, 0.9f, 1f, 1f);
             main.maxParticles = 20;
             main.loop = false;
-            main.playOnAwake = true;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
 
             var emission = ps.emission;
@@ -303,6 +305,7 @@ namespace GhostVeil.Drone
             psr.material = new Material(Shader.Find("Sprites/Default"));
             psr.sortingOrder = 12;
 
+            ps.Play();
             Destroy(effectObj, 1f);
         }
 
@@ -312,7 +315,10 @@ namespace GhostVeil.Drone
             effectObj.transform.position = position;
 
             var ps = effectObj.AddComponent<ParticleSystem>();
+            ps.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
+
             var main = ps.main;
+            main.playOnAwake = false;
             main.duration = 0.4f;
             main.startLifetime = 0.3f;
             main.startSpeed = 1.5f;
@@ -320,7 +326,6 @@ namespace GhostVeil.Drone
             main.startColor = new Color(1f, 0.5f, 0.2f, 1f); // 橘色消散
             main.maxParticles = 12;
             main.loop = false;
-            main.playOnAwake = true;
             main.simulationSpace = ParticleSystemSimulationSpace.World;
 
             var emission = ps.emission;
@@ -338,6 +343,7 @@ namespace GhostVeil.Drone
             psr.material = new Material(Shader.Find("Sprites/Default"));
             psr.sortingOrder = 12;
 
+            ps.Play();
             Destroy(effectObj, 0.8f);
         }
     }

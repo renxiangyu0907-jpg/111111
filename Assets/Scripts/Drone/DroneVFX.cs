@@ -116,12 +116,13 @@ namespace GhostVeil.Drone
             thrusterObj.transform.localPosition = new Vector3(-0.2f, 0f, 0f);
 
             _thrusterPS = thrusterObj.AddComponent<ParticleSystem>();
+            _thrusterPS.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
             // ── Main Module ──
             var main = _thrusterPS.main;
+            main.playOnAwake = false;
             main.duration = 1f;
             main.loop = true;
-            main.playOnAwake = true;
             main.startLifetime = thrusterLifetime;
             main.startSpeed = thrusterSpeed;
             main.startSize = thrusterSize;
@@ -172,6 +173,9 @@ namespace GhostVeil.Drone
             var psr = thrusterObj.GetComponent<ParticleSystemRenderer>();
             psr.material = new Material(Shader.Find("Sprites/Default"));
             psr.sortingOrder = 3;
+
+            // 配置完毕后再启动播放
+            _thrusterPS.Play();
         }
 
         private void CreateHoverParticles()
@@ -182,12 +186,13 @@ namespace GhostVeil.Drone
             hoverObj.transform.localRotation = Quaternion.Euler(0, 0, 0); // 向下
 
             _hoverPS = hoverObj.AddComponent<ParticleSystem>();
+            _hoverPS.Stop(true, ParticleSystemStopBehavior.StopEmittingAndClear);
 
             // ── Main Module ──
             var main = _hoverPS.main;
+            main.playOnAwake = false;
             main.duration = 1f;
             main.loop = true;
-            main.playOnAwake = true;
             main.startLifetime = 0.4f;
             main.startSpeed = hoverSpeed;
             main.startSize = 0.03f;
@@ -242,6 +247,9 @@ namespace GhostVeil.Drone
             var psr = hoverObj.GetComponent<ParticleSystemRenderer>();
             psr.material = new Material(Shader.Find("Sprites/Default"));
             psr.sortingOrder = 3;
+
+            // 配置完毕后再启动播放
+            _hoverPS.Play();
         }
 
         // ══════════════════════════════════════════════
