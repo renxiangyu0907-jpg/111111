@@ -206,10 +206,13 @@ namespace GhostVeil.Drone
             shape.radius = 0.1f;
 
             // ── Velocity over Lifetime（向下散射） ──
+            // 注意：X/Y/Z 必须使用相同的曲线模式，否则报错
+            // "Particle Velocity curves must all be in the same mode"
             var vel = _hoverPS.velocityOverLifetime;
             vel.enabled = true;
-            vel.y = new ParticleSystem.MinMaxCurve(-hoverSpeed);
             vel.x = new ParticleSystem.MinMaxCurve(-0.2f, 0.2f);
+            vel.y = new ParticleSystem.MinMaxCurve(-hoverSpeed, -hoverSpeed * 0.5f);
+            vel.z = new ParticleSystem.MinMaxCurve(0f, 0f);
 
             // ── Color over Lifetime ──
             var colorOverLifetime = _hoverPS.colorOverLifetime;
