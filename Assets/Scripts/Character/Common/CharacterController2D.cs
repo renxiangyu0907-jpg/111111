@@ -144,9 +144,13 @@ namespace GhostVeil.Character.Common
             if (Facing == direction) return;
             Facing = direction;
 
-            var scale = transform.localScale;
-            scale.x = Mathf.Abs(scale.x) * (int)direction;
-            transform.localScale = scale;
+            // 注意：如果挂了 SpineAnimator 且 controlFlip = true，
+            // 翻转由 Skeleton.ScaleX 处理（见 SpineAnimator.SetFaceDirection）。
+            // 此处不再翻转 transform.localScale，避免与 Spine 翻转双重叠加。
+            // 如果没有 Spine（纯 SpriteRenderer），取消下面注释即可恢复 localScale 翻转：
+            // var scale = transform.localScale;
+            // scale.x = Mathf.Abs(scale.x) * (int)direction;
+            // transform.localScale = scale;
         }
 
         /// <summary>
