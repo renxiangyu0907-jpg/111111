@@ -118,7 +118,7 @@ namespace GhostVeil.Physics
         //  IRaycastController.Move — 核心管线
         // ══════════════════════════════════════════════
 
-        public Vector2 Move(Vector2 desiredMovement, bool standingOnPlatform = false)
+        public virtual Vector2 Move(Vector2 desiredMovement, bool standingOnPlatform = false)
         {
             // ── Step 1: 刷新射线原点 ────────────────────
             UpdateRaycastOrigins();

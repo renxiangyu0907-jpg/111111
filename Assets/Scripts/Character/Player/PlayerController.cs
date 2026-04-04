@@ -137,9 +137,37 @@ namespace GhostVeil.Character.Player
         //  水平速度平滑计算的中间变量
         // ══════════════════════════════════════════════
 
-        /// <summary>SmoothDamp 内部使用的参考速度（不要手动修改）</summary>
+        /// <summary>
+        /// 水平速度平滑计算的中间变量。
+        /// SmoothDamp 内部使用的参考速度（不要手动修改）
+        /// </summary>
         [System.NonSerialized]
         public float HorizontalSmoothVelocity;
+
+        // ══════════════════════════════════════════════
+        //  着地宽容期 (Ground Grace)
+        // ══════════════════════════════════════════════
+        //
+        //  在不平地形上 IsGrounded 可能每帧闪烁，导致状态机
+        //  在 Idle/Run <-> Fall 之间快速切换，表现为抖动。
+        //  Ground Grace 在角色刚刚失去地面接触后提供一个很短的
+        //  宽容期（远小于 coyoteTime），期间仍视为着地。
+
+        private float _groundGraceTimer;
+        private const float GroundGraceDuration = 0.05f; // 50ms 宽容期
+
+        /// <summary>
+        /// 是否视为站在地面（含宽容期）。
+        /// 状态机和跳跃判定应使用此属性而非 base.IsGrounded。
+        /// </summary>
+        public new bool IsGrounded
+        {
+            get
+            {
+                if (base.IsGrounded) return true;
+                return _groundGraceTimer > 0f;
+            }
+        }
 
         // ══════════════════════════════════════════════
         //  CharacterController2D 抽象方法实现
@@ -227,6 +255,16 @@ namespace GhostVeil.Character.Player
             // ── 安全守卫：任何核心依赖缺失时跳过整个逻辑帧 ──
             if (inputProvider == null || moveData == null || raycastController == null)
                 return;
+
+            // ── Step 0: 更新着地宽容期计时器 ────────────
+            if (base.IsGrounded)
+            {
+                _groundGraceTimer = GroundGraceDuration;
+            }
+            else
+            {
+                _groundGraceTimer -= deltaTime;
+            }
 
             // ── Step 1: 更新辅助计时器 ──────────────────
 
