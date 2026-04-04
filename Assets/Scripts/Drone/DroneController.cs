@@ -6,8 +6,30 @@
 //   1. 延迟跟随 Player（记录 Player 位置历史，取若干帧前的位置作为目标）
 //   2. 悬浮动画（Sine 波上下浮动）
 //   3. 自主朝向（面向最近敌人，无敌人时跟随移动方向或 Player 朝向）
-//   4. 支持 Inspector 拖入 Sprite 作为外观；未赋值时用代码生成占位图
+//   4. 支持自定义 Sprite（Inspector 拖入图片）或代码生成占位外观
 //   5. 管理推进器粒子特效（DroneVFX 组件）
+//
+// ┌─────────────────────────────────────────────────────────────────┐
+// │  图片导入步骤：                                                  │
+// │                                                                 │
+// │  1. 将 PNG 图片拖入 Unity 的 Assets 文件夹                       │
+// │     （推荐放在 Assets/Art/Drone/ 下）                            │
+// │                                                                 │
+// │  2. 在 Project 窗口选中图片 → Inspector 面板中设置：              │
+// │     · Texture Type  →  Sprite (2D and UI)                       │
+// │     · Sprite Mode   →  Single（整张图）                          │
+// │     · Pixels Per Unit → 32 或 64（控制图片在游戏中的大小）        │
+// │       - 值越大，图在游戏中越小                                    │
+// │       - 值越小，图在游戏中越大                                    │
+// │     · Filter Mode   →  Point（像素风）或 Bilinear（平滑）         │
+// │     · 点击右下角 Apply                                           │
+// │                                                                 │
+// │  3. 在 DroneManager 的 Inspector 面板中：                         │
+// │     · 将图片拖到 "Drone Sprite" 字段                             │
+// │     · 调整 "Sprite Scale" 控制大小                               │
+// │                                                                 │
+// │  如果不设置 Sprite，会自动使用代码生成的占位外观。                  │
+// └─────────────────────────────────────────────────────────────────┘
 //
 // 挂载方式：
 //   由 DroneManager 在拾取道具时动态创建，不需手动挂载。
@@ -42,10 +64,11 @@ namespace GhostVeil.Drone
         [SerializeField] private float hoverFrequency = 2f;
 
         [Header("=== 外观 ===")]
-        [Tooltip("无人机 Sprite（从 Inspector 拖入图片）。留空则使用代码生成的占位图。")]
+        [Tooltip("无人机 Sprite（留空则使用代码生成的占位外观）\n" +
+                 "导入方法：将 PNG 拖入 Assets → Inspector 中 Texture Type 设为 Sprite → 拖到此字段")]
         [SerializeField] private Sprite droneSprite;
 
-        [Tooltip("Sprite 缩放倍率（根据图片实际大小调整）")]
+        [Tooltip("Sprite 缩放（调整图片在游戏中的大小）")]
         [SerializeField] private float spriteScale = 1f;
 
         [Tooltip("Sprite 排序层级")]
@@ -73,7 +96,8 @@ namespace GhostVeil.Drone
 
         // 视觉组件
         private SpriteRenderer _bodyRenderer;
-        private SpriteRenderer _coreLightRenderer;
+        private SpriteRenderer _coreLightRenderer; // 仅占位模式使用
+        private bool _usingCustomSprite;
         private DroneVFX _vfx;
         private DroneWeapon _weapon;
 
@@ -94,8 +118,19 @@ namespace GhostVeil.Drone
         // ══════════════════════════════════════════════
 
         /// <summary>由 DroneManager 调用初始化</summary>
-        public void Initialize(Transform player, int formationIndex)
+        /// <param name="player">跟随目标</param>
+        /// <param name="formationIndex">编队索引</param>
+        /// <param name="customSprite">自定义 Sprite（可选，覆盖 Inspector 设置）</param>
+        /// <param name="customScale">自定义缩放（可选，&lt;=0 则用默认值）</param>
+        public void Initialize(Transform player, int formationIndex,
+                               Sprite customSprite = null, float customScale = -1f)
         {
+            // 如果外部传入了 Sprite，覆盖 Inspector 字段
+            if (customSprite != null)
+                droneSprite = customSprite;
+            if (customScale > 0f)
+                spriteScale = customScale;
+
             _player = player;
             FormationIndex = formationIndex;
 
@@ -156,7 +191,7 @@ namespace GhostVeil.Drone
             // ── 5. 搜索最近敌人 & 更新朝向 ──
             UpdateTargetAndFacing();
 
-            // ── 6. 更新核心灯闪烁 ──
+            // ── 6. 更新核心灯闪烁（仅占位模式） ──
             UpdateCoreLightPulse();
         }
 
@@ -258,7 +293,7 @@ namespace GhostVeil.Drone
         }
 
         // ══════════════════════════════════════════════
-        //  外观创建（优先用 Inspector 拖入的 Sprite）
+        //  外观创建
         // ══════════════════════════════════════════════
 
         private void CreateVisuals()
@@ -266,36 +301,26 @@ namespace GhostVeil.Drone
             if (droneSprite != null)
             {
                 // ════════════════════════════════════════
-                //  模式 A：使用用户提供的 Sprite 图片
+                //  自定义 Sprite 模式
                 // ════════════════════════════════════════
-                CreateSpriteVisuals();
+                _usingCustomSprite = true;
+                CreateCustomSpriteVisual();
             }
             else
             {
                 // ════════════════════════════════════════
-                //  模式 B：代码生成占位图（无图片时的兜底）
+                //  占位外观模式（代码生成）
                 // ════════════════════════════════════════
+                _usingCustomSprite = false;
                 CreatePlaceholderVisuals();
             }
         }
 
         /// <summary>
-        /// 使用 Inspector 中赋值的 Sprite 创建外观。
-        /// 
-        /// 导入步骤：
-        ///   1. 把 PNG/PSD 文件放到 Assets/ 下任意位置（推荐 Assets/Sprites/Drone/）
-        ///   2. 在 Unity 的 Project 窗口选中图片 → Inspector 面板设置：
-        ///      · Texture Type = Sprite (2D and UI)
-        ///      · Sprite Mode = Single（整张图一个 Sprite）
-        ///      · Pixels Per Unit = 根据你的图片大小设置
-        ///        （例如 128x128 的图，PPU=128 则在游戏中为 1 个 Unity 单位大小）
-        ///      · Filter Mode = Bilinear 或 Point（像素风选 Point）
-        ///      · 点击 Apply
-        ///   3. 在 Hierarchy 选中挂有 DroneController 的 GameObject（或 Prefab）
-        ///   4. 把图片从 Project 窗口拖到 Inspector 的 "Drone Sprite" 字段
-        ///   5. 调整 "Sprite Scale" 控制大小
+        /// 使用自定义图片创建无人机外观。
+        /// 只需一个 SpriteRenderer，翻转和缩放由 DroneController 管理。
         /// </summary>
-        private void CreateSpriteVisuals()
+        private void CreateCustomSpriteVisual()
         {
             var bodyObj = new GameObject("DroneBody");
             bodyObj.transform.SetParent(transform, false);
@@ -304,16 +329,13 @@ namespace GhostVeil.Drone
 
             _bodyRenderer = bodyObj.AddComponent<SpriteRenderer>();
             _bodyRenderer.sprite = droneSprite;
-            _bodyRenderer.color = Color.white; // 不染色，保持原图颜色
+            _bodyRenderer.color = Color.white; // 不染色，显示原图颜色
             _bodyRenderer.sortingOrder = spriteSortingOrder;
-
-            // 用 Sprite 模式时不需要代码生成的核心灯，
-            // 但保留 _coreLightRenderer 引用为 null，
-            // UpdateCoreLightPulse() 会自动跳过。
-            _coreLightRenderer = null;
         }
 
-        /// <summary>代码生成的占位外观（无图片时兜底）</summary>
+        /// <summary>
+        /// 代码生成占位外观（无自定义 Sprite 时的回退方案）。
+        /// </summary>
         private void CreatePlaceholderVisuals()
         {
             // ── 机体（圆角矩形） ──
@@ -339,11 +361,11 @@ namespace GhostVeil.Drone
             coreObj.transform.localScale = Vector3.one * 0.012f;
 
             // ── 上翼 ──
-            CreateWing("TopWing", new Vector3(0f, 0.18f, 0f), new Vector3(0.02f, 0.006f, 1f),
-                new Color(0.35f, 0.38f, 0.45f));
+            CreateWing("TopWing", new Vector3(0f, 0.18f, 0f),
+                new Vector3(0.02f, 0.006f, 1f), new Color(0.35f, 0.38f, 0.45f));
             // ── 下翼 ──
-            CreateWing("BottomWing", new Vector3(0f, -0.12f, 0f), new Vector3(0.015f, 0.005f, 1f),
-                new Color(0.35f, 0.38f, 0.45f));
+            CreateWing("BottomWing", new Vector3(0f, -0.12f, 0f),
+                new Vector3(0.015f, 0.005f, 1f), new Color(0.35f, 0.38f, 0.45f));
 
             // ── 天线 ──
             var antennaObj = new GameObject("Antenna");
@@ -378,15 +400,49 @@ namespace GhostVeil.Drone
             ren.sortingOrder = 4;
         }
 
+        /// <summary>运行时替换无人机 Sprite（可在游戏中动态换皮）</summary>
+        public void SetSprite(Sprite newSprite, float scale = -1f)
+        {
+            if (newSprite == null) return;
+
+            droneSprite = newSprite;
+            if (scale > 0f) spriteScale = scale;
+
+            if (!_usingCustomSprite)
+            {
+                // 从占位模式切换到自定义模式：销毁旧零部件
+                for (int i = transform.childCount - 1; i >= 0; i--)
+                {
+                    var child = transform.GetChild(i);
+                    // 保留粒子特效子物体
+                    if (child.GetComponent<ParticleSystem>() != null) continue;
+                    if (child.name.Contains("VFX") || child.name.Contains("Muzzle")) continue;
+                    Destroy(child.gameObject);
+                }
+                _coreLightRenderer = null;
+                _usingCustomSprite = true;
+                CreateCustomSpriteVisual();
+            }
+            else
+            {
+                // 已经是自定义模式，直接换图
+                if (_bodyRenderer != null)
+                {
+                    _bodyRenderer.sprite = newSprite;
+                    _bodyRenderer.transform.localScale = Vector3.one * spriteScale;
+                }
+            }
+        }
+
         // ══════════════════════════════════════════════
-        //  核心灯脉冲
+        //  核心灯脉冲（仅占位模式）
         // ══════════════════════════════════════════════
 
         private void UpdateCoreLightPulse()
         {
-            if (_coreLightRenderer == null) return;
+            // 自定义 Sprite 模式下没有核心灯，跳过
+            if (_usingCustomSprite || _coreLightRenderer == null) return;
 
-            // 脉冲：根据是否有目标改变颜色和闪烁频率
             float pulse;
             Color baseColor;
 
@@ -413,10 +469,9 @@ namespace GhostVeil.Drone
         }
 
         // ══════════════════════════════════════════════
-        //  Sprite 工厂方法
+        //  Sprite 工厂方法（占位模式用）
         // ══════════════════════════════════════════════
 
-        /// <summary>创建一个圆角矩形 Sprite</summary>
         private static Sprite CreateRoundedRectSprite(int width, int height, int radius)
         {
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
@@ -426,14 +481,10 @@ namespace GhostVeil.Drone
             {
                 for (int x = 0; x < width; x++)
                 {
-                    // 计算到圆角矩形边缘的距离
                     float dx = Mathf.Max(0, Mathf.Max(radius - x, x - (width - 1 - radius)));
                     float dy = Mathf.Max(0, Mathf.Max(radius - y, y - (height - 1 - radius)));
                     float dist = Mathf.Sqrt(dx * dx + dy * dy);
-
                     float alpha = Mathf.Clamp01(1f - (dist - radius + 1f));
-
-                    // 添加金属质感渐变
                     float metallic = 0.7f + 0.3f * ((float)y / height);
                     tex.SetPixel(x, y, new Color(metallic, metallic, metallic, alpha));
                 }
@@ -444,7 +495,6 @@ namespace GhostVeil.Drone
                 new Vector2(0.5f, 0.5f), Mathf.Max(width, height));
         }
 
-        /// <summary>创建一个圆形 Sprite</summary>
         private static Sprite CreateCircleSprite(int size)
         {
             var tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
@@ -458,7 +508,7 @@ namespace GhostVeil.Drone
                 {
                     float dist = Vector2.Distance(new Vector2(x, y), new Vector2(center, center));
                     float alpha = Mathf.Clamp01(1f - (dist / radius));
-                    alpha = alpha * alpha; // 柔和衰减
+                    alpha = alpha * alpha;
                     tex.SetPixel(x, y, new Color(1, 1, 1, alpha));
                 }
             }
@@ -468,7 +518,6 @@ namespace GhostVeil.Drone
                 new Vector2(0.5f, 0.5f), size);
         }
 
-        /// <summary>创建一个简单矩形 Sprite</summary>
         private static Sprite CreateRectSprite(int width, int height)
         {
             var tex = new Texture2D(width, height, TextureFormat.RGBA32, false);
@@ -487,11 +536,9 @@ namespace GhostVeil.Drone
 #if UNITY_EDITOR
         private void OnDrawGizmosSelected()
         {
-            // 绘制敌人搜索范围
             Gizmos.color = new Color(1f, 0.3f, 0.3f, 0.3f);
             Gizmos.DrawWireSphere(transform.position, enemySearchRadius);
 
-            // 绘制目标连线
             if (CurrentTarget != null)
             {
                 Gizmos.color = Color.red;

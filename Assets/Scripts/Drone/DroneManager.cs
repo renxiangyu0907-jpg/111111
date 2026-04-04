@@ -32,9 +32,9 @@ namespace GhostVeil.Drone
         [Tooltip("生成无人机时的出场动画时间")]
         [SerializeField] private float spawnAnimDuration = 0.5f;
 
-        [Header("=== Prefab 模式（推荐） ===")]
+        [Header("=== 方式一：Prefab 模式（推荐） ===")]
         [Tooltip("无人机 Prefab（已配置好 Sprite）。\n" +
-                 "留空则用代码动态创建（占位图模式）。\n\n" +
+                 "留空则用下面的 Drone Sprite 或代码占位图。\n\n" +
                  "制作方法：\n" +
                  "1. 在 Hierarchy 右键 → Create Empty\n" +
                  "2. 挂上 DroneController 脚本\n" +
@@ -43,6 +43,15 @@ namespace GhostVeil.Drone
                  "5. 拖到 Project 窗口变成 Prefab\n" +
                  "6. 把 Prefab 拖到这里")]
         [SerializeField] private GameObject dronePrefab;
+
+        [Header("=== 方式二：直接拖图片（简单） ===")]
+        [Tooltip("无人机 Sprite 图片。\n" +
+                 "没有 Prefab 时用这个：直接把 PNG 图片拖到这里。\n" +
+                 "图片需要先设置为 Sprite 格式（Inspector → Texture Type → Sprite）")]
+        [SerializeField] private Sprite droneSprite;
+
+        [Tooltip("Sprite 缩放倍率（调整图片在游戏中的大小）")]
+        [SerializeField] private float droneSpriteScale = 1f;
 
         // ══════════════════════════════════════════════
         //  运行时
@@ -131,12 +140,13 @@ namespace GhostVeil.Drone
             // 初始位置：拾取点或 Player 头顶
             Vector3 startPos = spawnPos ?? (_player.position + Vector3.up * 1.5f);
 
+            GameObject droneObj;
             DroneController controller;
 
             if (dronePrefab != null)
             {
                 // ══ Prefab 模式：用预制体实例化（已包含 Sprite） ══
-                var droneObj = Instantiate(dronePrefab, startPos, Quaternion.identity);
+                droneObj = Instantiate(dronePrefab, startPos, Quaternion.identity);
                 droneObj.name = $"Drone_{formationIndex}_{droneType}";
 
                 controller = droneObj.GetComponent<DroneController>();
@@ -147,12 +157,13 @@ namespace GhostVeil.Drone
             }
             else
             {
-                // ══ 代码模式：动态创建（占位图） ══
-                var droneObj = new GameObject($"Drone_{formationIndex}_{droneType}");
+                // ══ 代码模式：动态创建 ══
+                droneObj = new GameObject($"Drone_{formationIndex}_{droneType}");
                 droneObj.transform.position = startPos;
 
                 controller = droneObj.AddComponent<DroneController>();
-                controller.Initialize(_player, formationIndex);
+                // 传入 Sprite（可为 null，DroneController 会自动回退到占位外观）
+                controller.Initialize(_player, formationIndex, droneSprite, droneSpriteScale);
             }
 
             _activeDrones.Add(controller);
