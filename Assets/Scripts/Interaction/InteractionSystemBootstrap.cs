@@ -18,6 +18,7 @@ using GhostVeil.UI;
 using GhostVeil.Narrative.Controller;
 using GhostVeil.Narrative.Dialogue;
 using GhostVeil.Narrative.Cutscene;
+using GhostVeil.Drone;
 
 namespace GhostVeil.Interaction
 {
@@ -102,6 +103,19 @@ namespace GhostVeil.Interaction
                 go.AddComponent<CrosshairUI>();
                 MakePersistent(go);
                 Debug.Log("[InteractionSystem] CrosshairUI 已创建");
+            }
+
+            // ══════════════════════════════════════════════
+            //  无人机系统
+            // ══════════════════════════════════════════════
+
+            // ── DroneManager（无人机编队管理器） ──────────
+            if (FindObjectOfType<DroneManager>() == null)
+            {
+                var go = new GameObject("[DroneManager]");
+                go.AddComponent<DroneManager>();
+                MakePersistent(go);
+                Debug.Log("[InteractionSystem] DroneManager 已创建");
             }
 
             Debug.Log("[InteractionSystem] 交互 + 叙事系统初始化完成。");
