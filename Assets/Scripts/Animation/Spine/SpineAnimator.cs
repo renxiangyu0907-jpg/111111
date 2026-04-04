@@ -151,6 +151,16 @@ namespace GhostVeil.Animation.Spine
             }
 
             Debug.Log("[SpineAnimator] Spine 组件初始化成功。", this);
+
+            // ── 列出可用动画名（方便调试） ────────────────
+            if (_skeleton?.Data?.Animations != null)
+            {
+                var animNames = new System.Text.StringBuilder();
+                animNames.Append("[SpineAnimator] 可用动画: ");
+                foreach (var anim in _skeleton.Data.Animations)
+                    animNames.Append($"\"{anim.Name}\", ");
+                Debug.Log(animNames.ToString(), this);
+            }
 #else
             // 未导入 Spine Runtime 时的提示
             if (Application.isPlaying)
@@ -310,6 +320,20 @@ namespace GhostVeil.Animation.Spine
         {
 #if HAS_SPINE_UNITY
             if (_skeletonAnim == null || _skeletonAnim.AnimationState == null) return;
+
+            // ── 安全查找：先检查动画是否存在于 SkeletonData 中 ──
+            var skeletonData = _skeletonAnim.Skeleton?.Data;
+            if (skeletonData != null)
+            {
+                var anim = skeletonData.FindAnimation(animationName);
+                if (anim == null)
+                {
+                    // 动画不存在 → 仅在首次警告，不抛异常
+                    Debug.LogWarning($"[SpineAnimator] 动画 \"{animationName}\" 未找到，" +
+                                     $"跳过播放。请检查 Spine 编辑器中的动画名称。", this);
+                    return;
+                }
+            }
 
             var entry = _skeletonAnim.AnimationState.SetAnimation(trackIndex, animationName, loop);
             if (entry != null && mixDuration >= 0f)

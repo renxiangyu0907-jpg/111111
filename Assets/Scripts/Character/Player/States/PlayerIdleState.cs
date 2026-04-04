@@ -27,7 +27,7 @@ namespace GhostVeil.Character.Player
         {
             // 刚着地时可能还残留微小水平速度，由 LogicUpdate 的平滑减速自然归零
             // 播放 Idle 动画（循环）—— Animator 为 null 时安全跳过
-            ctx.Animator?.PlayAnim("idle", true);
+            ctx.Animator?.PlayAnim(ctx.IdleAnimName, true);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────

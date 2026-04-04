@@ -42,6 +42,19 @@ namespace GhostVeil.Character.Player
         [Tooltip("移动参数数据（ScriptableObject）")]
         [SerializeField] private PlayerMovementData moveData;
 
+        [Header("=== Spine 动画名称映射 ===")]
+        [Tooltip("Idle 状态对应的 Spine 动画名（必须与 Spine 编辑器中一致）")]
+        [SerializeField] private string idleAnimName = "idle";
+
+        [Tooltip("Run 状态对应的 Spine 动画名")]
+        [SerializeField] private string runAnimName = "run";
+
+        [Tooltip("Jump 状态对应的 Spine 动画名")]
+        [SerializeField] private string jumpAnimName = "jump";
+
+        [Tooltip("Fall 状态对应的 Spine 动画名")]
+        [SerializeField] private string fallAnimName = "fall";
+
         // ══════════════════════════════════════════════
         //  强类型状态机
         // ══════════════════════════════════════════════
@@ -69,6 +82,16 @@ namespace GhostVeil.Character.Player
         /// 可为 null —— 未挂 SpineAnimator 时角色逻辑照常运行，只是没有动画。
         /// </summary>
         public SpineAnimator Animator { get; private set; }
+
+        // ── 动画名称公开属性（供状态类读取） ────────────
+        /// <summary>Idle 动画名（Inspector 可配置）</summary>
+        public string IdleAnimName => idleAnimName;
+        /// <summary>Run 动画名</summary>
+        public string RunAnimName => runAnimName;
+        /// <summary>Jump 动画名</summary>
+        public string JumpAnimName => jumpAnimName;
+        /// <summary>Fall 动画名</summary>
+        public string FallAnimName => fallAnimName;
 
         // ══════════════════════════════════════════════
         //  跳跃缓冲 (Jump Buffer)
