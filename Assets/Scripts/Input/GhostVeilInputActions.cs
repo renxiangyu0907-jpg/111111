@@ -262,14 +262,13 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""WASD"",
                     ""id"": ""92704ffd-de80-4e0c-b72a-2afd0b94b155"",
-                    ""path"": """",
+                    ""path"": ""2DVector"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Move"",
                     ""isComposite"": true,
-                    ""isPartOfComposite"": false,
-                    ""compositeType"": ""2DVector""
+                    ""isPartOfComposite"": false
                 },
                 {
                     ""name"": ""up"",
@@ -318,14 +317,13 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""Arrow Keys"",
                     ""id"": ""78286c7c-364f-43bb-88ca-9ea880348a06"",
-                    ""path"": """",
+                    ""path"": ""2DVector"",
                     ""interactions"": """",
                     ""processors"": """",
                     ""groups"": """",
                     ""action"": ""Move"",
                     ""isComposite"": true,
-                    ""isPartOfComposite"": false,
-                    ""compositeType"": ""2DVector""
+                    ""isPartOfComposite"": false
                 },
                 {
                     ""name"": ""up"",
