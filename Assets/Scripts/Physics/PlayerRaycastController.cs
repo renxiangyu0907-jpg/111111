@@ -65,6 +65,7 @@ namespace GhostVeil.Physics
         // ── 运行时 ────────────────────────────────────
         private float _fallThroughTimer;
         private bool _wasGroundedBeforeMove;
+        private bool _didStepUpThisFrame;
 
         // ══════════════════════════════════════════════
         //  Unity 生命周期
@@ -102,6 +103,7 @@ namespace GhostVeil.Physics
         public override Vector2 Move(Vector2 desiredMovement, bool standingOnPlatform = false)
         {
             _wasGroundedBeforeMove = _collisions.Below;
+            _didStepUpThisFrame = false;
 
             // ── Step 1: 刷新射线原点 ──
             UpdateRaycastOrigins();
@@ -123,15 +125,24 @@ namespace GhostVeil.Physics
                 DescendSlope(ref movement);
 
             // ── Step 6: 水平碰撞检测（含台阶攀登） ──
+            bool didStepUp = false;
             if (movement.x != 0)
+            {
                 HorizontalCollisions(ref movement);
+                didStepUp = _didStepUpThisFrame;
+            }
 
             // ── Step 7: 垂直碰撞检测 ──
-            VerticalCollisions(ref movement);
+            // 台阶跨越后 movement.y > 0，VerticalCollisions 会检测天花板而非地面，
+            // 导致 Below 被覆写为 false。跳过垂直检测，保留 TryStepUp 设置的 Below=true。
+            if (!didStepUp)
+            {
+                VerticalCollisions(ref movement);
+            }
 
             // ── Step 8: 地面吸附 ──
-            // 条件：移动前在地面上、不在上升中、本帧垂直检测没命中地面
-            if (_wasGroundedBeforeMove && !_collisions.Below
+            // 条件：移动前在地面上、不在上升中、本帧垂直检测没命中地面、未执行台阶攀登
+            if (!didStepUp && _wasGroundedBeforeMove && !_collisions.Below
                 && movement.y <= 0.001f && Mathf.Abs(movement.x) > 0.001f)
             {
                 SnapToGround(ref movement);
@@ -140,7 +151,15 @@ namespace GhostVeil.Physics
             // ── Step 9: 应用最终位移 ──
             transform.Translate(movement);
 
-            // ── Step 10: 移动平台强制着地 ──
+            // ── Step 10: 台阶攀登后补充一次向下探测 ──
+            // 确保跨上台阶后角色紧贴地面，不会悬浮
+            if (didStepUp)
+            {
+                UpdateRaycastOrigins(); // 位移后刷新射线原点
+                SnapToGroundAfterStepUp();
+            }
+
+            // ── Step 11: 移动平台强制着地 ──
             if (standingOnPlatform)
                 _collisions.Below = true;
 
@@ -275,6 +294,8 @@ namespace GhostVeil.Physics
         /// </summary>
         private bool TryStepUp(ref Vector2 movement, float dirX, float rayLength)
         {
+            _didStepUpThisFrame = false;
+
             // 1. 最底部水平射线检测
             Vector2 bottomOrigin = (dirX < 0) ? _raycastOrigins.BottomLeft : _raycastOrigins.BottomRight;
             RaycastHit2D bottomHit = Physics2D.Raycast(bottomOrigin, Vector2.right * dirX, rayLength, collisionMask);
@@ -319,10 +340,15 @@ namespace GhostVeil.Physics
             // 5. 执行台阶跨越：修正 movement
             movement.y = Mathf.Max(movement.y, stepHeight + skinWidth);
 
+            // 6. 限制水平位移，不能超过碰撞点（防止穿墙）
+            movement.x = (bottomHit.distance - skinWidth) * dirX
+                         + dirX * skinWidth * 2f; // 多走一点，确保站上台阶顶面
+
             // 标记为着地（跨台阶应视为地面行走，不触发 Fall 状态）
             _collisions.Below = true;
             _collisions.GroundNormal = downHit.normal;
             _collisions.GroundCollider = downHit.collider;
+            _didStepUpThisFrame = true;
 
             return true;
         }
@@ -363,6 +389,37 @@ namespace GhostVeil.Physics
             }
         }
 
+        /// <summary>
+        /// 台阶攀登后的地面吸附。
+        /// 跨上台阶后角色可能悬浮在台阶顶面上方，需要向下探测并吸附。
+        /// 在 transform.Translate(movement) 之后调用。
+        /// </summary>
+        private void SnapToGroundAfterStepUp()
+        {
+            Vector2 center = (_raycastOrigins.BottomLeft + _raycastOrigins.BottomRight) * 0.5f;
+            float probeDistance = maxStepHeight + skinWidth * 4f;
+
+            RaycastHit2D hit = Physics2D.Raycast(
+                center, Vector2.down, probeDistance, collisionMask | oneWayPlatformMask);
+
+            Debug.DrawRay(center, Vector2.down * probeDistance, Color.cyan);
+
+            if (hit && hit.distance > skinWidth)
+            {
+                float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
+                if (snapAngle <= maxSlopeAngle)
+                {
+                    // 直接移动 transform（已经在 Translate 之后）
+                    float snapDist = hit.distance - skinWidth;
+                    transform.Translate(Vector2.down * snapDist);
+
+                    _collisions.Below = true;
+                    _collisions.GroundNormal = hit.normal;
+                    _collisions.GroundCollider = hit.collider;
+                }
+            }
+        }
+
         // ══════════════════════════════════════════════
         //  垂直碰撞检测
         // ══════════════════════════════════════════════
@@ -383,6 +440,15 @@ namespace GhostVeil.Physics
             // 但此模式下只设置碰撞标记，不修正 movement.y，
             // 避免因 (hit.distance - skinWidth) 的微小正值导致角色向上抖动。
             bool isGroundProbeOnly = Mathf.Approximately(movement.y, 0f);
+
+            // ── 关键修正 ────────────────────────────────────
+            // ClimbSlope 可能将 movement.y 设为正值（哪怕只是微小斜面），
+            // 如果角色之前在地面上且 movement.y 很小（坡道爬升量），
+            // 强制进入地面探测模式，避免仅检测天花板而遗漏地面。
+            bool climbingSmallSlope = _collisions.ClimbingSlope
+                                      && movement.y > 0f
+                                      && movement.y < maxStepHeight
+                                      && _wasGroundedBeforeMove;
 
             float dirY;
             float rayLength;
@@ -474,6 +540,42 @@ namespace GhostVeil.Physics
                 {
                     _collisions.GroundCollider = hit.collider;
                     _collisions.GroundNormal = hit.normal;
+                }
+            }
+
+            // ── 爬小坡时补充地面探测 ────────────────────────
+            // ClimbSlope 将 movement.y 设为正值，导致上面只检测了天花板。
+            // 角色实际上还在地面上行走（只是地面微微倾斜），
+            // 需要补充一次向下探测以维持 Below = true。
+            if (climbingSmallSlope && !_collisions.Below)
+            {
+                LayerMask downMask = collisionMask;
+                if (!_collisions.FallingThroughPlatform)
+                    downMask |= oneWayPlatformMask;
+
+                float probeLength = movement.y + skinWidth * 3f;
+                for (int i = 0; i < verticalRayCount; i++)
+                {
+                    Vector2 rayOrigin = _raycastOrigins.BottomLeft
+                        + Vector2.right * (_verticalRaySpacing * i + movement.x)
+                        + Vector2.up * movement.y; // 从爬坡后的位置向下探测
+
+                    RaycastHit2D hit = Physics2D.Raycast(
+                        rayOrigin, Vector2.down, probeLength, downMask);
+
+                    Debug.DrawRay(rayOrigin, Vector2.down * probeLength, Color.white);
+
+                    if (hit && hit.distance > 0f)
+                    {
+                        float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
+                        if (snapAngle <= maxSlopeAngle)
+                        {
+                            _collisions.Below = true;
+                            _collisions.GroundCollider = hit.collider;
+                            _collisions.GroundNormal = hit.normal;
+                            break; // 探测到地面即可
+                        }
+                    }
                 }
             }
 
