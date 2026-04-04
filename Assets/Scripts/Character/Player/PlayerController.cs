@@ -154,7 +154,15 @@ namespace GhostVeil.Character.Player
         //  宽容期（远小于 coyoteTime），期间仍视为着地。
 
         private float _groundGraceTimer;
-        private const float GroundGraceDuration = 0.05f; // 50ms 宽容期
+
+        /// <summary>
+        /// 着地宽容期时长（秒）。
+        /// 拼接地面（多个 BoxCollider2D，Edge Radius=0）的接缝处，
+        /// 射线可能在 1~3 帧内全部落入间隙导致 Below=false。
+        /// 100ms 宽容期可覆盖约 6 帧（60fps），足够消除接缝闪烁，
+        /// 同时仍远小于 coyoteTime，不会影响走出平台后的下落感觉。
+        /// </summary>
+        private const float GroundGraceDuration = 0.10f; // 100ms 宽容期
 
         /// <summary>
         /// 是否视为站在地面（含宽容期）。

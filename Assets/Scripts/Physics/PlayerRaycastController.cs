@@ -142,8 +142,10 @@ namespace GhostVeil.Physics
 
             // ── Step 8: 地面吸附 ──
             // 条件：移动前在地面上、不在上升中、本帧垂直检测没命中地面、未执行台阶攀登
+            // 改进：去掉 "必须有水平移动" 的限制。拼接地面的接缝处，即使站立不动，
+            // 垂直射线也可能全部落入间隙导致 Below=false。此时仍需吸附。
             if (!didStepUp && _wasGroundedBeforeMove && !_collisions.Below
-                && movement.y <= 0.001f && Mathf.Abs(movement.x) > 0.001f)
+                && movement.y <= 0.001f)
             {
                 SnapToGround(ref movement);
             }
@@ -360,32 +362,49 @@ namespace GhostVeil.Physics
         /// <summary>
         /// 角色在地面水平移动时，向下搜索地面并吸附。
         /// 防止在小地形高低差处飞起来导致状态机抖动。
+        /// 
+        /// 改进：发射多根射线（而非单根中心射线），
+        /// 防止所有射线恰好落在拼接地形的接缝上而全部漏检。
         /// </summary>
         private void SnapToGround(ref Vector2 movement)
         {
             if (groundSnapDistance <= 0f) return;
 
-            // 从移动修正后的底部中心向下发射射线
-            Vector2 center = (_raycastOrigins.BottomLeft + _raycastOrigins.BottomRight) * 0.5f
-                             + movement;
+            LayerMask snapMask = collisionMask | oneWayPlatformMask;
+            float bestDist = float.MaxValue;
+            RaycastHit2D bestHit = default;
 
-            RaycastHit2D hit = Physics2D.Raycast(
-                center, Vector2.down, groundSnapDistance, collisionMask | oneWayPlatformMask);
-
-            Debug.DrawRay(center, Vector2.down * groundSnapDistance, Color.blue);
-
-            if (hit && hit.distance > skinWidth)
+            // 使用与垂直碰撞相同的多射线布局，增强抗接缝能力
+            for (int i = 0; i < verticalRayCount; i++)
             {
-                float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
-                if (snapAngle <= maxSlopeAngle)
-                {
-                    // 吸附到地面
-                    movement.y = -(hit.distance - skinWidth);
+                Vector2 rayOrigin = _raycastOrigins.BottomLeft
+                    + Vector2.right * (_verticalRaySpacing * i)
+                    + movement; // 从移动修正后的位置发射
 
-                    _collisions.Below = true;
-                    _collisions.GroundNormal = hit.normal;
-                    _collisions.GroundCollider = hit.collider;
+                RaycastHit2D hit = Physics2D.Raycast(
+                    rayOrigin, Vector2.down, groundSnapDistance, snapMask);
+
+                Debug.DrawRay(rayOrigin, Vector2.down * groundSnapDistance, Color.blue);
+
+                if (hit && hit.distance > 0f && hit.distance < bestDist)
+                {
+                    float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
+                    if (snapAngle <= maxSlopeAngle)
+                    {
+                        bestDist = hit.distance;
+                        bestHit = hit;
+                    }
                 }
+            }
+
+            if (bestHit && bestDist > skinWidth)
+            {
+                // 吸附到地面
+                movement.y = -(bestDist - skinWidth);
+
+                _collisions.Below = true;
+                _collisions.GroundNormal = bestHit.normal;
+                _collisions.GroundCollider = bestHit.collider;
             }
         }
 
@@ -453,15 +472,24 @@ namespace GhostVeil.Physics
             float dirY;
             float rayLength;
 
+            // ── 最小探测距离 ────────────────────────────────
+            // 拼接地面（多个 BoxCollider2D 拼接，Edge Radius=0）的接缝处，
+            // 射线可能落在两个碰撞体之间的微小间隙中。
+            // 保证向下探测长度至少为 skinWidth * 5，即使 movement.y 很小也不会漏检。
+            const float minGroundProbeLength = 0.08f; // ≈ skinWidth(0.015) * 5.3
+
             if (isGroundProbeOnly)
             {
                 dirY = -1f;              // 固定向下探测
-                rayLength = skinWidth * 3f; // 宽松一点的探测距离
+                rayLength = Mathf.Max(skinWidth * 3f, minGroundProbeLength);
             }
             else
             {
                 dirY = Mathf.Sign(movement.y);
                 rayLength = Mathf.Abs(movement.y) + skinWidth;
+                // 向下探测时，保证最小探测距离，防止因 movement.y 极小而漏检地面接缝
+                if (dirY < 0f)
+                    rayLength = Mathf.Max(rayLength, minGroundProbeLength);
             }
 
             // ── 构建本帧使用的碰撞掩码 ────────────────
@@ -513,7 +541,9 @@ namespace GhostVeil.Physics
                     _collisions.Below = true;
                     _collisions.GroundCollider = hit.collider;
                     _collisions.GroundNormal = hit.normal;
-                    return; // 探测到地面即可，无需继续
+                    // 不要 return —— 继续检测其余射线以找到最近命中点，
+                    // 用于后续坡道过渡修正。但标记已设置，不影响着地判定。
+                    continue;
                 }
 
                 // 修正垂直位移：只能走到碰撞点 - skinWidth
