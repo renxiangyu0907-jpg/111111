@@ -207,20 +207,20 @@ namespace GhostVeil.Input
     ""maps"": [
         {
             ""name"": ""Gameplay"",
-            ""id"": ""a1b2c3d4-0001-0001-0001-000000000001"",
+            ""id"": ""ecb4fd46-6ce0-4b10-a271-d3e071509f93"",
             ""actions"": [
                 {
                     ""name"": ""Move"",
                     ""type"": ""Value"",
-                    ""id"": ""a1b2c3d4-0002-0001-0001-000000000001"",
+                    ""id"": ""956b1d8e-f4b8-473c-9c73-1ecc5a2676dc"",
                     ""expectedControlType"": ""Vector2"",
                     ""interactions"": """",
-                    ""processors"": ""StickDeadzone(min=0.125,max=0.925)""
+                    ""processors"": """"
                 },
                 {
                     ""name"": ""Jump"",
                     ""type"": ""Button"",
-                    ""id"": ""a1b2c3d4-0002-0002-0001-000000000001"",
+                    ""id"": ""3bf9c3ed-d542-4268-b17c-619c72f0d6c3"",
                     ""expectedControlType"": ""Button"",
                     ""interactions"": """",
                     ""processors"": """"
@@ -228,7 +228,7 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""Attack"",
                     ""type"": ""Button"",
-                    ""id"": ""a1b2c3d4-0002-0003-0001-000000000001"",
+                    ""id"": ""c0a15d9f-c088-4630-8e2b-5202424a8c2b"",
                     ""expectedControlType"": ""Button"",
                     ""interactions"": """",
                     ""processors"": """"
@@ -236,7 +236,7 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""Dash"",
                     ""type"": ""Button"",
-                    ""id"": ""a1b2c3d4-0002-0004-0001-000000000001"",
+                    ""id"": ""8984144a-e44f-4521-925e-e005cfb92716"",
                     ""expectedControlType"": ""Button"",
                     ""interactions"": """",
                     ""processors"": """"
@@ -244,7 +244,7 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""Interact"",
                     ""type"": ""Button"",
-                    ""id"": ""a1b2c3d4-0002-0005-0001-000000000001"",
+                    ""id"": ""cc40fdef-014e-497e-8176-efa956a086eb"",
                     ""expectedControlType"": ""Button"",
                     ""interactions"": """",
                     ""processors"": """"
@@ -252,7 +252,7 @@ namespace GhostVeil.Input
                 {
                     ""name"": ""Pause"",
                     ""type"": ""Button"",
-                    ""id"": ""a1b2c3d4-0002-0006-0001-000000000001"",
+                    ""id"": ""3a9d43b3-5579-4c09-8bf2-364c94799199"",
                     ""expectedControlType"": ""Button"",
                     ""interactions"": """",
                     ""processors"": """"
@@ -261,7 +261,7 @@ namespace GhostVeil.Input
             ""bindings"": [
                 {
                     ""name"": ""WASD"",
-                    ""id"": ""b1-0001"",
+                    ""id"": ""92704ffd-de80-4e0c-b72a-2afd0b94b155"",
                     ""path"": """",
                     ""interactions"": """",
                     ""processors"": """",
@@ -273,7 +273,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""up"",
-                    ""id"": ""b1-0002"",
+                    ""id"": ""f83b962d-027e-4894-9448-47f8325dd385"",
                     ""path"": ""<Keyboard>/w"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -284,7 +284,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""down"",
-                    ""id"": ""b1-0003"",
+                    ""id"": ""1130e884-7822-4f63-b789-b9c0c974edf6"",
                     ""path"": ""<Keyboard>/s"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -295,7 +295,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""left"",
-                    ""id"": ""b1-0004"",
+                    ""id"": ""c851143a-a72c-43a6-b237-97e452801cd3"",
                     ""path"": ""<Keyboard>/a"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -306,7 +306,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""right"",
-                    ""id"": ""b1-0005"",
+                    ""id"": ""faf0e8d9-ef9d-4844-ac0b-f974b23c7977"",
                     ""path"": ""<Keyboard>/d"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -317,7 +317,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""Arrow Keys"",
-                    ""id"": ""b1-0006"",
+                    ""id"": ""78286c7c-364f-43bb-88ca-9ea880348a06"",
                     ""path"": """",
                     ""interactions"": """",
                     ""processors"": """",
@@ -329,7 +329,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""up"",
-                    ""id"": ""b1-0007"",
+                    ""id"": ""5ce66235-cae2-47cb-a3e2-4d0c4342e099"",
                     ""path"": ""<Keyboard>/upArrow"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -340,7 +340,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""down"",
-                    ""id"": ""b1-0008"",
+                    ""id"": ""8d1397e1-fc1a-44a3-a0a2-7099e1c98067"",
                     ""path"": ""<Keyboard>/downArrow"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -351,7 +351,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""left"",
-                    ""id"": ""b1-0009"",
+                    ""id"": ""b304f40e-fadd-4735-bd77-aec29daa2993"",
                     ""path"": ""<Keyboard>/leftArrow"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -362,7 +362,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": ""right"",
-                    ""id"": ""b1-0010"",
+                    ""id"": ""a46f5c2b-5c4a-411c-946b-c7db94c4dfdb"",
                     ""path"": ""<Keyboard>/rightArrow"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -373,10 +373,10 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b1-0011"",
+                    ""id"": ""72ae853f-3d1f-48d5-9a25-846dcb11af14"",
                     ""path"": ""<Gamepad>/leftStick"",
                     ""interactions"": """",
-                    ""processors"": """",
+                    ""processors"": ""StickDeadzone(min=0.125,max=0.925)"",
                     ""groups"": ""Gamepad"",
                     ""action"": ""Move"",
                     ""isComposite"": false,
@@ -384,7 +384,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b2-0001"",
+                    ""id"": ""6359d46f-51a4-47f5-8a38-cc076ec5c94a"",
                     ""path"": ""<Keyboard>/space"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -395,7 +395,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b2-0002"",
+                    ""id"": ""cec415f7-005a-4051-bcb5-0febee575897"",
                     ""path"": ""<Gamepad>/buttonSouth"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -406,7 +406,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b3-0001"",
+                    ""id"": ""34db6431-4693-47e1-a55b-d1f49b9984ff"",
                     ""path"": ""<Keyboard>/j"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -417,7 +417,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b3-0002"",
+                    ""id"": ""2515aa4d-a8e4-4b3b-81e7-61b140b28733"",
                     ""path"": ""<Gamepad>/buttonWest"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -428,7 +428,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b4-0001"",
+                    ""id"": ""8b9e2ff1-a131-4763-a4c6-4f28f099c2e6"",
                     ""path"": ""<Keyboard>/leftShift"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -439,7 +439,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b4-0002"",
+                    ""id"": ""9a98d221-7eae-4664-bd62-894101f52f06"",
                     ""path"": ""<Gamepad>/rightShoulder"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -450,7 +450,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b5-0001"",
+                    ""id"": ""4c13ccb9-aca2-4bf7-bfdc-f03dcbcb7350"",
                     ""path"": ""<Keyboard>/e"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -461,7 +461,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b5-0002"",
+                    ""id"": ""67296100-9be0-4a6b-aa05-399c59382a73"",
                     ""path"": ""<Gamepad>/buttonNorth"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -472,7 +472,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b6-0001"",
+                    ""id"": ""4ade9c29-2ec6-406a-b250-2ac12cb25364"",
                     ""path"": ""<Keyboard>/escape"",
                     ""interactions"": """",
                     ""processors"": """",
@@ -483,7 +483,7 @@ namespace GhostVeil.Input
                 },
                 {
                     ""name"": """",
-                    ""id"": ""b6-0002"",
+                    ""id"": ""c037378b-750c-4d6b-8de7-0dda7d2c0408"",
                     ""path"": ""<Gamepad>/start"",
                     ""interactions"": """",
                     ""processors"": """",
