@@ -40,7 +40,7 @@ namespace GhostVeil.Character.Player
             // 如果是从 JumpState 转入的，CoyoteTimer 已经是 0 了。
 
             // 播放下落动画（不循环，播完保持最后一帧）
-            ctx.Animator?.PlayAnim("jump_fall", false);
+            ctx.Animator?.PlayAnim("animation", false);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────
