@@ -150,6 +150,17 @@ namespace GhostVeil.Physics
                 SnapToGround(ref movement);
             }
 
+            // ── DEBUG: 穿地诊断日志（定位后删除） ──
+            if (!_collisions.Below && _wasGroundedBeforeMove)
+            {
+                Debug.LogWarning($"[RayCtrl] LOST GROUND! pos={transform.position}, " +
+                    $"desiredMov={desiredMovement}, finalMov={movement}, " +
+                    $"probeOnly={Mathf.Approximately(desiredMovement.y, 0f)}, " +
+                    $"stepUp={didStepUp}, descSlope={_collisions.DescendingSlope}, " +
+                    $"climbSlope={_collisions.ClimbingSlope}, " +
+                    $"botLeft={_raycastOrigins.BottomLeft}, botRight={_raycastOrigins.BottomRight}");
+            }
+
             // ── Step 9: 应用最终位移 ──
             transform.Translate(movement);
 
@@ -501,6 +512,10 @@ namespace GhostVeil.Physics
             if (includeOneWay)
                 effectiveMask |= oneWayPlatformMask;
 
+            // ── DEBUG: 射线命中统计 ──
+            int _dbgHitCount = 0;
+            int _dbgMissCount = 0;
+
             for (int i = 0; i < verticalRayCount; i++)
             {
                 // 射线起点：
@@ -515,7 +530,8 @@ namespace GhostVeil.Physics
                 // ── Debug 可视化 ────────────────────────
                 Debug.DrawRay(rayOrigin, Vector2.up * dirY * rayLength, Color.green);
 
-                if (!hit) continue;
+                if (!hit) { _dbgMissCount++; continue; }
+                _dbgHitCount++;
 
                 // ── 单向平台额外校验 ────────────────────
                 // 单向平台只在从上方落下时生效；
@@ -571,6 +587,16 @@ namespace GhostVeil.Physics
                     _collisions.GroundCollider = hit.collider;
                     _collisions.GroundNormal = hit.normal;
                 }
+            }
+
+            // ── DEBUG: 所有射线都 miss 时打印详情 ──
+            if (dirY < 0 && _dbgHitCount == 0 && _wasGroundedBeforeMove)
+            {
+                Debug.LogWarning($"[VertCol] ALL RAYS MISSED! dirY={dirY}, rayLen={rayLength:F4}, " +
+                    $"probeOnly={isGroundProbeOnly}, movY={movement.y:F6}, " +
+                    $"mask={effectiveMask.value}, pos={transform.position}, " +
+                    $"BL={_raycastOrigins.BottomLeft}, BR={_raycastOrigins.BottomRight}, " +
+                    $"hits={_dbgHitCount}, miss={_dbgMissCount}");
             }
 
             // ── 爬小坡时补充地面探测 ────────────────────────
