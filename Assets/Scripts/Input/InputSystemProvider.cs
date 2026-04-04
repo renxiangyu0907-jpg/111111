@@ -62,7 +62,7 @@ namespace GhostVeil.Input
         // ══════════════════════════════════════════════
 
         [Header("=== 下方向阈值 ===")]
-        [Tooltip("垂直轴低于此值视为"按住下"（用于下+跳穿透单向平台）")]
+        [Tooltip("垂直轴低于此值视为'按住下'（用于下+跳穿透单向平台）")]
         [SerializeField, Range(-1f, 0f)]
         private float _downThreshold = -0.5f;
 

@@ -52,7 +52,7 @@ namespace GhostVeil.Input
 
             // ── Move: Value<Vector2> ──────────────────
             var move = gameplay.AddAction("Move", InputActionType.Value,
-                expectedControlType: "Vector2");
+                expectedControlLayout: "Vector2");
 
             // WASD Composite
             move.AddCompositeBinding("2DVector")
