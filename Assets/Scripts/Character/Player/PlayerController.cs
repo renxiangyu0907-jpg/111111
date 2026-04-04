@@ -198,6 +198,26 @@ namespace GhostVeil.Character.Player
             _stateMachine.Initialize(BuiltInStateID.Idle);
         }
 
+        /// <summary>
+        /// Start 完成后的额外初始化。
+        /// 执行一次初始地面检测，避免第一帧因 Collisions.Below 未设置
+        /// 而从 Idle 误切到 Fall（表现为开场瞬间抖一下）。
+        /// </summary>
+        protected override void OnStart()
+        {
+            if (raycastController != null)
+            {
+                // 发射一次微小向下的 Move 来初始化碰撞状态
+                raycastController.Move(new Vector2(0f, -0.001f));
+                // 如果检测到地面，标记上一帧也是着地（防止第一帧的 ground snap 误判）
+                if (raycastController.Collisions.Below)
+                {
+                    WasGroundedLastFrame = true;
+                    Velocity = Vector2.zero;
+                }
+            }
+        }
+
         // ══════════════════════════════════════════════
         //  主循环
         // ══════════════════════════════════════════════
@@ -279,11 +299,6 @@ namespace GhostVeil.Character.Player
         /// <summary>
         /// 将 Velocity 转换为位移并送入射线控制器。
         /// 射线控制器碰撞修正后，回写 Velocity（撞墙/撞地/撞头时清零对应分量）。
-        /// 
-        /// 包含地面吸附机制：当角色上一帧在地面上、本帧没有主动跳跃、
-        /// 但 Move() 后 Below 为 false 时，额外发射一次短距离地面探测射线。
-        /// 如果探测到地面则强制吸附，防止因浮点精度 / skinWidth 边界导致的
-        /// grounded 单帧闪烁（fall↔idle 抖动的根本原因）。
         /// </summary>
         private void ExecuteMovement(float deltaTime)
         {
@@ -292,25 +307,6 @@ namespace GhostVeil.Character.Player
 
             // ── 碰撞后速度修正 ──────────────────────────
             ref var col = ref raycastController.Collisions;
-
-            // ── 地面吸附 (Ground Snap) ──────────────────
-            // 条件：上一帧着地 + 本帧向下或零速 + Move 后未检测到地面
-            // 排除：主动跳跃（Velocity.y > 0 表示正在起跳）
-            if (WasGroundedLastFrame && !col.Below && Velocity.y <= 0f)
-            {
-                // 向下发射一次短距离探测，尝试重新吸附地面
-                float snapDistance = 0.25f; // 允许最多 0.25 单位的吸附距离
-                Vector2 snapMovement = new Vector2(0f, -snapDistance);
-                raycastController.Move(snapMovement);
-
-                // 如果探测成功，标记 grounded 并重置垂直速度
-                if (raycastController.Collisions.Below)
-                {
-                    col = ref raycastController.Collisions; // 刷新引用
-                    Velocity = new Vector2(Velocity.x, 0f);
-                    return; // 跳过下面的常规修正（已经处理完了）
-                }
-            }
 
             // 撞到地面或天花板 → 垂直速度清零
             if (col.Above || col.Below)

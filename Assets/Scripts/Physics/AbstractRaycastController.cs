@@ -144,12 +144,12 @@ namespace GhostVeil.Physics
                 HorizontalCollisions(ref movement);
 
             // ── Step 7: 垂直碰撞检测 ────────────────────
-            // 注意：即使 movement.y 为 0，当角色在地面时仍需检测。
-            // 否则 Collisions.Below 每帧都被 Reset 清为 false，
-            // 导致 IsGrounded 闪烁（fall↔idle 抖动的根本原因之一）。
-            // 改为：movement.y 不为零 或 之前存在下坡/爬坡检测时，都执行垂直检测。
-            if (movement.y != 0 || _collisions.ClimbingSlope || _collisions.DescendingSlope)
-                VerticalCollisions(ref movement);
+            // 始终执行垂直碰撞检测，不再跳过 movement.y == 0 的情况。
+            // 原因：Move() 开头 Reset() 会清掉 Below 标记，如果跳过垂直检测，
+            // IsGrounded 会在 Below=false 的状态下被读取，导致状态机误判为
+            // 空中 → fall↔idle 抖动。VerticalCollisions 内部已处理 movement.y==0
+            // 的零速度地面探测（向下发射 skinWidth*2 的短射线），不会产生副作用。
+            VerticalCollisions(ref movement);
 
             // ── Step 8: 应用最终位移 ────────────────────
             transform.Translate(movement);
