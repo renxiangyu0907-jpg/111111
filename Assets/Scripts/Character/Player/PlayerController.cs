@@ -200,21 +200,21 @@ namespace GhostVeil.Character.Player
 
         /// <summary>
         /// Start 完成后的额外初始化。
-        /// 执行一次初始地面检测，避免第一帧因 Collisions.Below 未设置
+        /// 执行一次原地地面检测（不位移），避免第一帧因 Collisions.Below 未设置
         /// 而从 Idle 误切到 Fall（表现为开场瞬间抖一下）。
         /// </summary>
         protected override void OnStart()
         {
-            if (raycastController != null)
+            if (raycastController == null) return;
+
+            // 用一次零位移 Move 来初始化碰撞状态。
+            // movement = (0,0) → VerticalCollisions 走纯探测路径（只设标记不位移）。
+            raycastController.Move(Vector2.zero);
+
+            if (IsGrounded)
             {
-                // 发射一次微小向下的 Move 来初始化碰撞状态
-                raycastController.Move(new Vector2(0f, -0.001f));
-                // 如果检测到地面，标记上一帧也是着地（防止第一帧的 ground snap 误判）
-                if (raycastController.Collisions.Below)
-                {
-                    WasGroundedLastFrame = true;
-                    Velocity = Vector2.zero;
-                }
+                WasGroundedLastFrame = true;
+                Velocity = Vector2.zero;
             }
         }
 

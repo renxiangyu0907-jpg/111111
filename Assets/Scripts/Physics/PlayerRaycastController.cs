@@ -206,17 +206,24 @@ namespace GhostVeil.Physics
         /// </summary>
         protected override void VerticalCollisions(ref Vector2 movement)
         {
-            float dirY = Mathf.Sign(movement.y);
-            float rayLength = Mathf.Abs(movement.y) + skinWidth;
+            // ── 零速度地面探测模式 ────────────────────────
+            // 当 movement.y ≈ 0 时，仍需向下探测以维持 Collisions.Below。
+            // 但此模式下只设置碰撞标记，不修正 movement.y，
+            // 避免因 (hit.distance - skinWidth) 的微小正值导致角色向上抖动。
+            bool isGroundProbeOnly = Mathf.Approximately(movement.y, 0f);
 
-            // ── 零速度地面探测 ────────────────────────────
-            // 当 movement.y == 0 时（如坡道修正后或处于静止状态），
-            // 仍需向下发射射线以维持 Collisions.Below 标记。
-            // 否则 Reset() 清掉 Below 后没有机会重新设置，导致 IsGrounded 闪烁。
-            if (Mathf.Approximately(movement.y, 0f))
+            float dirY;
+            float rayLength;
+
+            if (isGroundProbeOnly)
             {
-                dirY = -1f; // 默认向下探测
-                rayLength = skinWidth * 2f; // 使用最小探测距离
+                dirY = -1f;              // 固定向下探测
+                rayLength = skinWidth * 3f; // 宽松一点的探测距离
+            }
+            else
+            {
+                dirY = Mathf.Sign(movement.y);
+                rayLength = Mathf.Abs(movement.y) + skinWidth;
             }
 
             // ── 构建本帧使用的碰撞掩码 ────────────────
@@ -260,6 +267,16 @@ namespace GhostVeil.Physics
                 }
 
                 // ── 命中处理 ────────────────────────────
+
+                if (isGroundProbeOnly)
+                {
+                    // 纯探测模式：只设标记，不修正 movement
+                    // 避免 (hit.distance - skinWidth) 产生微小正值导致角色上下抖动
+                    _collisions.Below = true;
+                    _collisions.GroundCollider = hit.collider;
+                    _collisions.GroundNormal = hit.normal;
+                    return; // 探测到地面即可，无需继续
+                }
 
                 // 修正垂直位移：只能走到碰撞点 - skinWidth
                 movement.y = (hit.distance - skinWidth) * dirY;

@@ -51,6 +51,9 @@ namespace GhostVeil.Input
         /// <summary>本帧是否刚刚按下攻击键</summary>
         bool AttackPressed { get; }
 
+        /// <summary>攻击键是否正在被持续按住（用于长按射击）</summary>
+        bool AttackHeld { get; }
+
         /// <summary>本帧是否刚刚按下冲刺键</summary>
         bool DashPressed { get; }
 

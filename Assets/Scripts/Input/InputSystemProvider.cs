@@ -76,6 +76,7 @@ namespace GhostVeil.Input
         // ── 持续量（每帧持续有效，由 performed/canceled 更新） ──
         private Vector2 _rawMoveVector;
         private bool _jumpHeldRaw;
+        private bool _attackHeldRaw;
 
         // ── 帧标记（仅触发帧为 true，LateUpdate 清零） ──
         //    用 "Flag" 后缀的私有字段存储原始标记，
@@ -105,6 +106,7 @@ namespace GhostVeil.Input
         public bool JumpReleased    => !_inputLocked && _jumpReleasedFlag;
         public bool JumpHeld        => !_inputLocked && _jumpHeldRaw;
         public bool AttackPressed   => !_inputLocked && _attackPressedFlag;
+        public bool AttackHeld      => !_inputLocked && _attackHeldRaw;
         public bool DashPressed     => !_inputLocked && _dashPressedFlag;
         public bool InteractPressed => !_inputLocked && _interactPressedFlag;
         public bool DownHeld        => !_inputLocked && (_rawMoveVector.y < _downThreshold);
@@ -236,12 +238,19 @@ namespace GhostVeil.Input
         // ── Attack ──────────────────────────────────
         public void OnAttack(InputAction.CallbackContext context)
         {
-            if (!context.performed) return;
+            if (context.performed)
+            {
+                _attackHeldRaw = true;
 
-            if (_inputLocked) return;
+                if (_inputLocked) return;
 
-            _attackPressedFlag = true;
-            OnAttackPressed?.Invoke();
+                _attackPressedFlag = true;
+                OnAttackPressed?.Invoke();
+            }
+            else if (context.canceled)
+            {
+                _attackHeldRaw = false;
+            }
         }
 
         // ── Dash ────────────────────────────────────

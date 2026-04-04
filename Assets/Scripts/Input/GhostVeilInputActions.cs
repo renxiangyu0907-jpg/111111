@@ -79,6 +79,7 @@ namespace GhostVeil.Input
             // ── Attack: Button ────────────────────────
             var attack = gameplay.AddAction("Attack", InputActionType.Button);
             attack.AddBinding("<Keyboard>/j");
+            attack.AddBinding("<Mouse>/leftButton");
             attack.AddBinding("<Gamepad>/buttonWest");
 
             // ── Dash: Button ──────────────────────────
