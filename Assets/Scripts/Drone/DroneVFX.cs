@@ -172,7 +172,7 @@ namespace GhostVeil.Drone
             // ── 渲染器 ──
             var psr = thrusterObj.GetComponent<ParticleSystemRenderer>();
             psr.material = new Material(Shader.Find("Sprites/Default"));
-            psr.sortingOrder = 3;
+            psr.sortingOrder = 99;
 
             // 配置完毕后再启动播放
             _thrusterPS.Play();
@@ -246,7 +246,7 @@ namespace GhostVeil.Drone
             // ── 渲染器 ──
             var psr = hoverObj.GetComponent<ParticleSystemRenderer>();
             psr.material = new Material(Shader.Find("Sprites/Default"));
-            psr.sortingOrder = 3;
+            psr.sortingOrder = 99;
 
             // 配置完毕后再启动播放
             _hoverPS.Play();

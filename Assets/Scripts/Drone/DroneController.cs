@@ -3,11 +3,12 @@
 // ============================================================================
 //
 // 功能：
-//   1. 延迟跟随 Player（记录 Player 位置历史，取若干帧前的位置作为目标）
+//   1. 延迟跟随 Player（基于时间的位置历史，取 N 秒前的位置作为目标）
 //   2. 悬浮动画（Sine 波上下浮动）
 //   3. 自主朝向（面向最近敌人，无敌人时跟随移动方向或 Player 朝向）
 //   4. 支持自定义 Sprite（Inspector 拖入图片）或代码生成占位外观
 //   5. 管理推进器粒子特效（DroneVFX 组件）
+//   6. 运动时微倾斜，增强视觉表现
 //
 // ┌─────────────────────────────────────────────────────────────────┐
 // │  图片导入步骤：                                                  │
@@ -36,6 +37,7 @@
 //
 
 using UnityEngine;
+using System.Collections.Generic;
 using GhostVeil.Combat;
 
 namespace GhostVeil.Drone
@@ -47,11 +49,11 @@ namespace GhostVeil.Drone
         // ══════════════════════════════════════════════
 
         [Header("=== 跟随参数 ===")]
-        [Tooltip("跟随延迟帧数（越大越 '拖尾'）")]
-        [SerializeField] private int followDelay = 12;
+        [Tooltip("跟随延迟时间（秒，越大越 '拖尾'）")]
+        [SerializeField] private float followDelayTime = 0.25f;
 
-        [Tooltip("跟随平滑速度")]
-        [SerializeField] private float followSmoothSpeed = 8f;
+        [Tooltip("跟随平滑速度（Lerp 插值速度）")]
+        [SerializeField] private float followSmoothSpeed = 10f;
 
         [Tooltip("相对 Player 的偏移（X 为身后方向，Y 为上方）")]
         [SerializeField] private Vector2 followOffset = new Vector2(-0.8f, 1.2f);
@@ -72,7 +74,7 @@ namespace GhostVeil.Drone
         [SerializeField] private float spriteScale = 1f;
 
         [Tooltip("Sprite 排序层级")]
-        [SerializeField] private int spriteSortingOrder = 5;
+        [SerializeField] private int spriteSortingOrder = 100;
 
         [Header("=== 朝向 ===")]
         [Tooltip("搜索敌人的范围半径")]
@@ -81,22 +83,37 @@ namespace GhostVeil.Drone
         [Tooltip("敌人所在 Layer")]
         [SerializeField] private LayerMask enemyLayerMask;
 
+        [Header("=== 运动倾斜 ===")]
+        [Tooltip("最大倾斜角度（度）")]
+        [SerializeField] private float maxTiltAngle = 15f;
+
+        [Tooltip("倾斜平滑速度")]
+        [SerializeField] private float tiltSmoothSpeed = 8f;
+
         // ══════════════════════════════════════════════
         //  运行时状态
         // ══════════════════════════════════════════════
 
         private Transform _player;
-        private Vector2[] _positionHistory;
-        private int _historyIndex;
-        private int _historySize;
-        private bool _historyFilled;
+
+        // 基于时间的位置历史（环形缓冲区）
+        private struct TimedPosition
+        {
+            public float Time;
+            public Vector2 Position;
+        }
+        private readonly List<TimedPosition> _positionHistory = new();
+        private const int MaxHistorySize = 300; // 最多存 300 条记录（约 5 秒 @ 60fps）
+
         private float _hoverPhase;
-        private Vector2 _smoothVelocity;
         private int _facingSign = 1; // 1 = right, -1 = left
+        private float _currentTilt;
+        private Vector3 _previousPosition;
 
         // 视觉组件
         private SpriteRenderer _bodyRenderer;
         private SpriteRenderer _coreLightRenderer; // 仅占位模式使用
+        private Transform _bodyTransform; // body 子物体的 transform，用于倾斜
         private bool _usingCustomSprite;
         private DroneVFX _vfx;
         private DroneWeapon _weapon;
@@ -134,23 +151,26 @@ namespace GhostVeil.Drone
             _player = player;
             FormationIndex = formationIndex;
 
-            // 初始化位置历史缓冲区
-            _historySize = followDelay + 1;
-            _positionHistory = new Vector2[_historySize];
-            _historyIndex = 0;
-            _historyFilled = false;
-
-            // 用 player 当前位置填充历史
+            // 初始化位置历史：用 player 当前位置填充
             Vector2 startPos = (Vector2)player.position + GetFormationOffset();
-            for (int i = 0; i < _historySize; i++)
-                _positionHistory[i] = startPos;
-            _historyFilled = true;
+            _positionHistory.Clear();
+            float now = Time.time;
+            // 预填充足够历史数据，覆盖 followDelayTime
+            for (int i = 0; i < 10; i++)
+            {
+                _positionHistory.Add(new TimedPosition
+                {
+                    Time = now - followDelayTime * (1f - i / 10f),
+                    Position = startPos
+                });
+            }
 
             // 随机悬浮相位（多个无人机不同步）
             _hoverPhase = Random.Range(0f, Mathf.PI * 2f);
 
             // 放到 player 身后
             transform.position = startPos;
+            _previousPosition = startPos;
 
             // 创建视觉外观
             CreateVisuals();
@@ -159,6 +179,8 @@ namespace GhostVeil.Drone
             _vfx = gameObject.AddComponent<DroneVFX>();
             _weapon = gameObject.AddComponent<DroneWeapon>();
             _weapon.Initialize(this);
+
+            Debug.Log($"[DroneController] 初始化完成, followDelay={followDelayTime}s, sortingOrder={spriteSortingOrder}");
         }
 
         // ══════════════════════════════════════════════
@@ -171,10 +193,10 @@ namespace GhostVeil.Drone
 
             float dt = Time.deltaTime;
 
-            // ── 1. 记录 Player 位置（含编队偏移） ──
+            // ── 1. 记录 Player 位置（含编队偏移）到时间轴 ──
             RecordPlayerPosition();
 
-            // ── 2. 获取延迟目标位置 ──
+            // ── 2. 获取延迟目标位置（基于时间） ──
             Vector2 targetPos = GetDelayedTargetPosition();
 
             // ── 3. 加入悬浮动画 ──
@@ -182,45 +204,83 @@ namespace GhostVeil.Drone
             float hoverY = Mathf.Sin(_hoverPhase) * hoverAmplitude;
             targetPos.y += hoverY;
 
-            // ── 4. 平滑移动到目标位置 ──
+            // ── 4. 平滑移动到目标位置（使用 Lerp 避免 SmoothDamp 的震荡） ──
             Vector2 currentPos = transform.position;
-            Vector2 newPos = Vector2.SmoothDamp(
-                currentPos, targetPos, ref _smoothVelocity, 1f / followSmoothSpeed);
-            transform.position = newPos;
+            float lerpFactor = 1f - Mathf.Exp(-followSmoothSpeed * dt);
+            Vector2 newPos = Vector2.Lerp(currentPos, targetPos, lerpFactor);
+            transform.position = new Vector3(newPos.x, newPos.y, transform.position.z);
 
             // ── 5. 搜索最近敌人 & 更新朝向 ──
             UpdateTargetAndFacing();
 
-            // ── 6. 更新核心灯闪烁（仅占位模式） ──
+            // ── 6. 运动倾斜 ──
+            UpdateTilt(dt);
+
+            // ── 7. 更新核心灯闪烁（仅占位模式） ──
             UpdateCoreLightPulse();
+
+            _previousPosition = transform.position;
         }
 
         // ══════════════════════════════════════════════
-        //  位置历史 & 延迟跟随
+        //  基于时间的位置历史 & 延迟跟随
         // ══════════════════════════════════════════════
 
         private void RecordPlayerPosition()
         {
             Vector2 targetBase = (Vector2)_player.position + GetFormationOffset();
-            _positionHistory[_historyIndex] = targetBase;
-            _historyIndex = (_historyIndex + 1) % _historySize;
-            if (!_historyFilled && _historyIndex == 0)
-                _historyFilled = true;
+
+            _positionHistory.Add(new TimedPosition
+            {
+                Time = Time.time,
+                Position = targetBase
+            });
+
+            // 清理过期记录（保留比 followDelayTime 多一些的余量）
+            float cutoffTime = Time.time - followDelayTime - 1f;
+            while (_positionHistory.Count > 2 && _positionHistory[0].Time < cutoffTime)
+            {
+                _positionHistory.RemoveAt(0);
+            }
+
+            // 限制总条数，防止极端情况下内存泄漏
+            while (_positionHistory.Count > MaxHistorySize)
+            {
+                _positionHistory.RemoveAt(0);
+            }
         }
 
         private Vector2 GetDelayedTargetPosition()
         {
-            // 读取 followDelay 帧前的位置
-            int delayedIndex;
-            if (_historyFilled)
+            float targetTime = Time.time - followDelayTime;
+
+            // 在历史中找到最接近 targetTime 的两个点，做插值
+            if (_positionHistory.Count == 0)
+                return transform.position;
+
+            // 如果 targetTime 比最早的记录还早，返回最早的
+            if (targetTime <= _positionHistory[0].Time)
+                return _positionHistory[0].Position;
+
+            // 如果 targetTime 比最新的记录还晚（不应该发生），返回最新的
+            int last = _positionHistory.Count - 1;
+            if (targetTime >= _positionHistory[last].Time)
+                return _positionHistory[last].Position;
+
+            // 二分查找或线性查找插值点
+            for (int i = 0; i < _positionHistory.Count - 1; i++)
             {
-                delayedIndex = (_historyIndex - followDelay - 1 + _historySize) % _historySize;
+                if (_positionHistory[i].Time <= targetTime && _positionHistory[i + 1].Time >= targetTime)
+                {
+                    float span = _positionHistory[i + 1].Time - _positionHistory[i].Time;
+                    if (span < 0.0001f) return _positionHistory[i].Position;
+
+                    float t = (targetTime - _positionHistory[i].Time) / span;
+                    return Vector2.Lerp(_positionHistory[i].Position, _positionHistory[i + 1].Position, t);
+                }
             }
-            else
-            {
-                delayedIndex = 0; // 缓冲区还没填满，用最早的
-            }
-            return _positionHistory[delayedIndex];
+
+            return _positionHistory[last].Position;
         }
 
         /// <summary>根据编队索引计算偏移</summary>
@@ -255,14 +315,18 @@ namespace GhostVeil.Drone
             else
             {
                 // 无敌人：跟随移动方向
-                if (Mathf.Abs(_smoothVelocity.x) > 0.1f)
-                    _facingSign = _smoothVelocity.x > 0 ? 1 : -1;
+                float velocityX = (transform.position.x - _previousPosition.x) / Mathf.Max(Time.deltaTime, 0.001f);
+                if (Mathf.Abs(velocityX) > 0.1f)
+                    _facingSign = velocityX > 0 ? 1 : -1;
             }
 
-            // 翻转视觉
-            Vector3 scale = transform.localScale;
-            scale.x = Mathf.Abs(scale.x) * _facingSign;
-            transform.localScale = scale;
+            // 翻转视觉（只翻转 body 子物体，不翻转整个 transform，避免影响粒子）
+            if (_bodyTransform != null)
+            {
+                Vector3 bodyScale = _bodyTransform.localScale;
+                bodyScale.x = Mathf.Abs(bodyScale.x) * _facingSign;
+                _bodyTransform.localScale = bodyScale;
+            }
         }
 
         private Transform FindNearestEnemy()
@@ -290,6 +354,25 @@ namespace GhostVeil.Drone
             }
 
             return nearest;
+        }
+
+        // ══════════════════════════════════════════════
+        //  运动倾斜
+        // ══════════════════════════════════════════════
+
+        private void UpdateTilt(float dt)
+        {
+            // 根据水平速度计算目标倾斜角度
+            float velocityX = (transform.position.x - _previousPosition.x) / Mathf.Max(dt, 0.001f);
+            float targetTilt = -Mathf.Clamp(velocityX * 2f, -1f, 1f) * maxTiltAngle;
+
+            _currentTilt = Mathf.Lerp(_currentTilt, targetTilt, 1f - Mathf.Exp(-tiltSmoothSpeed * dt));
+
+            // 应用倾斜到 body 子物体
+            if (_bodyTransform != null)
+            {
+                _bodyTransform.localRotation = Quaternion.Euler(0f, 0f, _currentTilt);
+            }
         }
 
         // ══════════════════════════════════════════════
@@ -331,50 +414,59 @@ namespace GhostVeil.Drone
             _bodyRenderer.sprite = droneSprite;
             _bodyRenderer.color = Color.white; // 不染色，显示原图颜色
             _bodyRenderer.sortingOrder = spriteSortingOrder;
+
+            _bodyTransform = bodyObj.transform;
         }
 
         /// <summary>
         /// 代码生成占位外观（无自定义 Sprite 时的回退方案）。
+        /// 所有占位零件放在一个容器子物体中，方便整体翻转和倾斜。
         /// </summary>
         private void CreatePlaceholderVisuals()
         {
+            // ── 容器物体（用于统一翻转和倾斜） ──
+            var containerObj = new GameObject("DroneBody");
+            containerObj.transform.SetParent(transform, false);
+            containerObj.transform.localPosition = Vector3.zero;
+            _bodyTransform = containerObj.transform;
+
             // ── 机体（圆角矩形） ──
-            var bodyObj = new GameObject("DroneBody");
-            bodyObj.transform.SetParent(transform, false);
+            var bodyObj = new GameObject("BodySprite");
+            bodyObj.transform.SetParent(containerObj.transform, false);
             bodyObj.transform.localPosition = Vector3.zero;
 
             _bodyRenderer = bodyObj.AddComponent<SpriteRenderer>();
             _bodyRenderer.sprite = CreateRoundedRectSprite(48, 28, 6);
             _bodyRenderer.color = new Color(0.25f, 0.28f, 0.35f, 1f);
-            _bodyRenderer.sortingOrder = 5;
+            _bodyRenderer.sortingOrder = spriteSortingOrder;
             bodyObj.transform.localScale = Vector3.one * 0.025f;
 
             // ── 中心能量灯 ──
             var coreObj = new GameObject("DroneCore");
-            coreObj.transform.SetParent(transform, false);
+            coreObj.transform.SetParent(containerObj.transform, false);
             coreObj.transform.localPosition = new Vector3(0.05f, 0f, 0f);
 
             _coreLightRenderer = coreObj.AddComponent<SpriteRenderer>();
             _coreLightRenderer.sprite = CreateCircleSprite(24);
             _coreLightRenderer.color = new Color(0f, 0.9f, 1f, 0.9f);
-            _coreLightRenderer.sortingOrder = 6;
+            _coreLightRenderer.sortingOrder = spriteSortingOrder + 1;
             coreObj.transform.localScale = Vector3.one * 0.012f;
 
             // ── 上翼 ──
-            CreateWing("TopWing", new Vector3(0f, 0.18f, 0f),
+            CreateWing(containerObj.transform, "TopWing", new Vector3(0f, 0.18f, 0f),
                 new Vector3(0.02f, 0.006f, 1f), new Color(0.35f, 0.38f, 0.45f));
             // ── 下翼 ──
-            CreateWing("BottomWing", new Vector3(0f, -0.12f, 0f),
+            CreateWing(containerObj.transform, "BottomWing", new Vector3(0f, -0.12f, 0f),
                 new Vector3(0.015f, 0.005f, 1f), new Color(0.35f, 0.38f, 0.45f));
 
             // ── 天线 ──
             var antennaObj = new GameObject("Antenna");
-            antennaObj.transform.SetParent(transform, false);
+            antennaObj.transform.SetParent(containerObj.transform, false);
             antennaObj.transform.localPosition = new Vector3(-0.1f, 0.2f, 0f);
             var antennaRen = antennaObj.AddComponent<SpriteRenderer>();
             antennaRen.sprite = CreateRectSprite(2, 12);
             antennaRen.color = new Color(0.5f, 0.55f, 0.6f);
-            antennaRen.sortingOrder = 5;
+            antennaRen.sortingOrder = spriteSortingOrder;
             antennaObj.transform.localScale = Vector3.one * 0.01f;
 
             // ── 天线灯 ──
@@ -384,20 +476,21 @@ namespace GhostVeil.Drone
             var antLightRen = antLightObj.AddComponent<SpriteRenderer>();
             antLightRen.sprite = CreateCircleSprite(8);
             antLightRen.color = new Color(1f, 0.3f, 0.2f, 0.9f);
-            antLightRen.sortingOrder = 7;
+            antLightRen.sortingOrder = spriteSortingOrder + 2;
         }
 
-        private void CreateWing(string name, Vector3 localPos, Vector3 scale, Color color)
+        private void CreateWing(Transform parent, string name, Vector3 localPos,
+                                Vector3 scale, Color color)
         {
             var wing = new GameObject(name);
-            wing.transform.SetParent(transform, false);
+            wing.transform.SetParent(parent, false);
             wing.transform.localPosition = localPos;
             wing.transform.localScale = scale;
 
             var ren = wing.AddComponent<SpriteRenderer>();
             ren.sprite = CreateRoundedRectSprite(32, 12, 3);
             ren.color = color;
-            ren.sortingOrder = 4;
+            ren.sortingOrder = spriteSortingOrder - 1;
         }
 
         /// <summary>运行时替换无人机 Sprite（可在游戏中动态换皮）</summary>
@@ -410,15 +503,10 @@ namespace GhostVeil.Drone
 
             if (!_usingCustomSprite)
             {
-                // 从占位模式切换到自定义模式：销毁旧零部件
-                for (int i = transform.childCount - 1; i >= 0; i--)
-                {
-                    var child = transform.GetChild(i);
-                    // 保留粒子特效子物体
-                    if (child.GetComponent<ParticleSystem>() != null) continue;
-                    if (child.name.Contains("VFX") || child.name.Contains("Muzzle")) continue;
-                    Destroy(child.gameObject);
-                }
+                // 从占位模式切换到自定义模式：销毁旧 body 容器
+                if (_bodyTransform != null)
+                    Destroy(_bodyTransform.gameObject);
+
                 _coreLightRenderer = null;
                 _usingCustomSprite = true;
                 CreateCustomSpriteVisual();
