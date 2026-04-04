@@ -39,7 +39,9 @@ namespace GhostVeil.Combat
         [SerializeField] private float bulletLifetime = 1.5f;
 
         [Tooltip("激光弹伤害")]
+#pragma warning disable CS0414
         [SerializeField] private float damage = 10f;
+#pragma warning restore CS0414
 
         [Header("=== 激光弹外观 ===")]
         [Tooltip("激光弹长度（单位）")]

@@ -29,8 +29,10 @@ namespace GhostVeil.Drone
         [Tooltip("最大无人机数量（0 = 无限制）")]
         [SerializeField] private int maxDrones = 5;
 
-        [Tooltip("生成无人机时的出场动画时间")]
+        [Tooltip("生成无人机时的出场动画时间（预留）")]
+#pragma warning disable CS0414
         [SerializeField] private float spawnAnimDuration = 0.5f;
+#pragma warning restore CS0414
 
         [Header("=== 方式一：Prefab 模式（推荐） ===")]
         [Tooltip("无人机 Prefab（已配置好 Sprite）。\n" +

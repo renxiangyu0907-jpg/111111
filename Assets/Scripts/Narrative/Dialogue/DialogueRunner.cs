@@ -49,7 +49,9 @@ namespace GhostVeil.Narrative.Dialogue
 
         public event Action OnDialogueCompleted;
         public event Action<string, string> OnLinePresented;
+#pragma warning disable CS0067
         public event Action<string[]> OnChoicesPresented;
+#pragma warning restore CS0067
 
         // ══════════════════════════════════════════════
         //  扩展事件（供 UI 逐字打印用）

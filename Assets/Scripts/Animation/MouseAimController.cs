@@ -37,7 +37,9 @@ namespace GhostVeil.Animation
 
         [Header("=== IK 设置 ===")]
         [Tooltip("IK 约束名称（必须与 Spine 编辑器中的名称一致）")]
+#pragma warning disable CS0414
         [SerializeField] private string ikConstraintName = "aim";
+#pragma warning restore CS0414
 
         [Tooltip("IK 权重（0=无效果，1=完全跟随）")]
         [SerializeField, Range(0f, 1f)] private float ikMix = 1f;

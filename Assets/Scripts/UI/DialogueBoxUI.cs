@@ -54,7 +54,9 @@ namespace GhostVeil.UI
 
         [Header("=== 立绘设置 ===")]
         [Tooltip("立绘/头像显示区域宽度（屏幕占比）")]
+#pragma warning disable CS0414
         [SerializeField] private float portraitWidthRatio = 0.1f;
+#pragma warning restore CS0414
 
         [Header("=== DialogueRunner 引用（留空自动查找） ===")]
         [SerializeField] private DialogueRunner dialogueRunnerRef;
