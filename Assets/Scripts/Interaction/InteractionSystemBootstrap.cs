@@ -95,6 +95,15 @@ namespace GhostVeil.Interaction
                 Debug.Log("[InteractionSystem] ScreenFadeUI 已创建");
             }
 
+            // ── 准星 UI ──────────────────────────────────
+            if (FindObjectOfType<CrosshairUI>() == null)
+            {
+                var go = new GameObject("[CrosshairUI]");
+                go.AddComponent<CrosshairUI>();
+                MakePersistent(go);
+                Debug.Log("[InteractionSystem] CrosshairUI 已创建");
+            }
+
             Debug.Log("[InteractionSystem] 交互 + 叙事系统初始化完成。");
         }
 

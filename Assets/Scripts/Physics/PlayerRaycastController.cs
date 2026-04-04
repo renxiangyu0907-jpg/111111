@@ -209,6 +209,16 @@ namespace GhostVeil.Physics
             float dirY = Mathf.Sign(movement.y);
             float rayLength = Mathf.Abs(movement.y) + skinWidth;
 
+            // ── 零速度地面探测 ────────────────────────────
+            // 当 movement.y == 0 时（如坡道修正后或处于静止状态），
+            // 仍需向下发射射线以维持 Collisions.Below 标记。
+            // 否则 Reset() 清掉 Below 后没有机会重新设置，导致 IsGrounded 闪烁。
+            if (Mathf.Approximately(movement.y, 0f))
+            {
+                dirY = -1f; // 默认向下探测
+                rayLength = skinWidth * 2f; // 使用最小探测距离
+            }
+
             // ── 构建本帧使用的碰撞掩码 ────────────────
             // 基础掩码 = 实心碰撞层
             LayerMask effectiveMask = collisionMask;

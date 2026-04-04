@@ -246,15 +246,17 @@ namespace GhostVeil.Character.Player
         /// 全局重力累加。
         /// · 上升期：使用基础重力（让跳跃弧线更"飘"）
         /// · 下落期：使用加强重力（让落地更"脆"、更有重量感）
-        /// · 着地时：Velocity.y 归零（防止重力在地面上持续累加）
+        /// · 着地时：Velocity.y 保持微小负值（确保射线持续检测地面）
         /// </summary>
         private void ApplyGravity(float deltaTime)
         {
             if (IsGrounded && Velocity.y <= 0f)
             {
-                // 着地：给一个微小的向下速度（而非 0），确保下坡时射线能检测到地面
-                // 如果设为 0，角色在平地→下坡交界处可能一帧检测不到 Below
-                Velocity = new Vector2(Velocity.x, -2f);
+                // 着地：给一个很小的向下速度以维持地面射线检测。
+                // -0.5f 足以让 VerticalCollisions 运行（movement.y != 0），
+                // 但不会大到让角色在一帧内产生可感知的下坠。
+                // 之前的 -2f 值过大，在帧率波动时可能导致 grounded 闪烁。
+                Velocity = new Vector2(Velocity.x, -0.5f);
                 return;
             }
 
@@ -277,6 +279,11 @@ namespace GhostVeil.Character.Player
         /// <summary>
         /// 将 Velocity 转换为位移并送入射线控制器。
         /// 射线控制器碰撞修正后，回写 Velocity（撞墙/撞地/撞头时清零对应分量）。
+        /// 
+        /// 包含地面吸附机制：当角色上一帧在地面上、本帧没有主动跳跃、
+        /// 但 Move() 后 Below 为 false 时，额外发射一次短距离地面探测射线。
+        /// 如果探测到地面则强制吸附，防止因浮点精度 / skinWidth 边界导致的
+        /// grounded 单帧闪烁（fall↔idle 抖动的根本原因）。
         /// </summary>
         private void ExecuteMovement(float deltaTime)
         {
@@ -285,6 +292,25 @@ namespace GhostVeil.Character.Player
 
             // ── 碰撞后速度修正 ──────────────────────────
             ref var col = ref raycastController.Collisions;
+
+            // ── 地面吸附 (Ground Snap) ──────────────────
+            // 条件：上一帧着地 + 本帧向下或零速 + Move 后未检测到地面
+            // 排除：主动跳跃（Velocity.y > 0 表示正在起跳）
+            if (WasGroundedLastFrame && !col.Below && Velocity.y <= 0f)
+            {
+                // 向下发射一次短距离探测，尝试重新吸附地面
+                float snapDistance = 0.25f; // 允许最多 0.25 单位的吸附距离
+                Vector2 snapMovement = new Vector2(0f, -snapDistance);
+                raycastController.Move(snapMovement);
+
+                // 如果探测成功，标记 grounded 并重置垂直速度
+                if (raycastController.Collisions.Below)
+                {
+                    col = ref raycastController.Collisions; // 刷新引用
+                    Velocity = new Vector2(Velocity.x, 0f);
+                    return; // 跳过下面的常规修正（已经处理完了）
+                }
+            }
 
             // 撞到地面或天花板 → 垂直速度清零
             if (col.Above || col.Below)
