@@ -73,11 +73,13 @@ namespace GhostVeil.Drone
         private void Awake()
         {
             FindPlayer();
+            Debug.Log($"[DroneManager] Awake 完成, Player={(_player != null ? _player.name : "未找到")}");
         }
 
         private void OnEnable()
         {
             GameEvent.Subscribe<DronePickupEvent>(OnDronePickup);
+            Debug.Log("[DroneManager] 已订阅 DronePickupEvent");
         }
 
         private void OnDisable()
@@ -101,6 +103,8 @@ namespace GhostVeil.Drone
 
         private void OnDronePickup(DronePickupEvent evt)
         {
+            Debug.Log($"[DroneManager] ★ 收到 DronePickupEvent! (类型: {evt.DroneType}, 拾取者: {evt.PickedUpBy?.name})");
+
             // 安全检查
             if (_player == null)
                 FindPlayer();
