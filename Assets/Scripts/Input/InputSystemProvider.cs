@@ -153,12 +153,12 @@ namespace GhostVeil.Input
 
         private void OnEnable()
         {
-            _actions.Gameplay.Enable();
+            _actions?.Gameplay.Enable();
         }
 
         private void OnDisable()
         {
-            _actions.Gameplay.Disable();
+            _actions?.Gameplay.Disable();
         }
 
         private void OnDestroy()
