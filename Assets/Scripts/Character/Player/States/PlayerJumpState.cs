@@ -34,7 +34,7 @@ namespace GhostVeil.Character.Player
             ctx.CoyoteTimer = 0f;
 
             // 播放跳跃上升动画（不循环，播完保持最后一帧）
-            ctx.Animator?.PlayAnim("animation", false);
+            ctx.Animator?.PlayAnim("jump", false);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────

@@ -27,7 +27,7 @@ namespace GhostVeil.Character.Player
         public override void Enter(PlayerController ctx)
         {
             // 播放 Run 动画（循环）
-            ctx.Animator?.PlayAnim("animation", true);
+            ctx.Animator?.PlayAnim("run", true);
         }
 
         // ── 每帧逻辑 ──────────────────────────────────
