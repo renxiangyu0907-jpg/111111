@@ -232,8 +232,8 @@ namespace GhostVeil.Animation.Spine
 #if HAS_SPINE_UNITY
             if (_skeleton != null)
             {
-                // Spine 4.3: Skeleton.ScaleX → Skeleton.Pose.ScaleX
-                _skeleton.Pose.ScaleX = baseScaleX * faceSign;
+                // Skeleton.ScaleX 在 4.3 中未变（只有 Bone/Slot/Constraint 移到了 .Pose）
+                _skeleton.ScaleX = baseScaleX * faceSign;
             }
 #endif
         }
