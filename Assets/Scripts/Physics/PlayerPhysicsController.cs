@@ -5,14 +5,13 @@
 //
 // 核心设计：
 //   · Rigidbody2D (Kinematic) + BoxCollider2D 作为角色碰撞体
-//   · 使用 Rigidbody2D.MovePosition() 移动角色（Kinematic 模式不受力影响）
-//   · 使用 Physics2D.BoxCast / OverlapBox 检测地面、墙壁、天花板
+//   · 使用 Physics2D.BoxCast 检测碰撞，手动计算最终位置
+//   · 使用 transform.position 直接设置位置（避免 MovePosition 的延迟问题）
 //   · 不使用 OnCollision / OnTrigger 回调，全部通过主动查询
 //
-// 优点：
-//   · 利用 Unity 物理引擎处理碰撞穿透修正，不需要手写射线碰撞
-//   · 代码量大幅减少，维护更简单
-//   · 与 Tilemap CompositeCollider2D 天然兼容
+// 重要：
+//   · 水平和垂直移动合并为一次位置更新
+//   · BoxCast 使用碰撞体 bounds 减去 skinWidth 避免贴墙卡住
 // ============================================================================
 
 using UnityEngine;
@@ -34,12 +33,15 @@ namespace GhostVeil.Physics
         [Tooltip("单向平台层")]
         [SerializeField] private LayerMask oneWayPlatformMask;
 
-        [Header("=== Ground Detection ===")]
-        [Tooltip("地面检测射线向下延伸距离")]
+        [Header("=== Detection Distances ===")]
+        [Tooltip("地面检测向下延伸距离")]
         [SerializeField] private float groundCheckDistance = 0.05f;
 
-        [Tooltip("墙壁检测射线水平延伸距离")]
+        [Tooltip("墙壁检测水平延伸距离")]
         [SerializeField] private float wallCheckDistance = 0.05f;
+
+        [Tooltip("碰撞体内缩距离（防止贴墙/贴地卡住）")]
+        [SerializeField] private float skinWidth = 0.015f;
 
         [Header("=== One-Way Platform ===")]
         [Tooltip("下落穿透单向平台后的冷却时间")]
@@ -92,13 +94,13 @@ namespace GhostVeil.Physics
             _rb = GetComponent<Rigidbody2D>();
             _collider = GetComponent<BoxCollider2D>();
 
-            // Kinematic 模式：不受力/重力影响，但仍参与碰撞检测
+            // Kinematic 模式：不受力/重力影响
             _rb.bodyType = RigidbodyType2D.Kinematic;
-            _rb.useFullKinematicContacts = true;
-            _rb.interpolation = RigidbodyInterpolation2D.Interpolate;
-            _rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
+            _rb.useFullKinematicContacts = false;
+            _rb.interpolation = RigidbodyInterpolation2D.None;
 
-            // 确保碰撞体不是 Trigger（需要物理碰撞阻挡）
+            // BoxCollider2D 不设为 Trigger —— 我们不依赖 Unity 碰撞响应，
+            // 但也不需要它产生碰撞响应（Kinematic 模式下不会产生物理力）
             _collider.isTrigger = false;
         }
 
@@ -123,126 +125,143 @@ namespace GhostVeil.Physics
         /// <summary>
         /// 移动角色并更新碰撞状态。
         /// 由 PlayerController 每帧调用。
+        /// 
+        /// 关键设计：水平和垂直碰撞检测分开做，
+        /// 但最终位置在一次 transform.position 赋值中完成，
+        /// 避免 MovePosition 的延迟覆盖问题。
         /// </summary>
         /// <param name="velocity">当前速度</param>
         /// <param name="deltaTime">时间步长</param>
         /// <returns>碰撞修正后的速度</returns>
         public Vector2 Move(Vector2 velocity, float deltaTime)
         {
-            Vector2 displacement = velocity * deltaTime;
+            // 计算本帧位移
+            float moveX = velocity.x * deltaTime;
+            float moveY = velocity.y * deltaTime;
 
             // 记录朝向
-            if (displacement.x != 0f)
-                FaceDir = (int)Mathf.Sign(displacement.x);
+            if (moveX > 0.001f) FaceDir = 1;
+            else if (moveX < -0.001f) FaceDir = -1;
 
-            // ── 水平移动 + 碰撞 ──
-            velocity = MoveHorizontal(velocity, displacement.x, deltaTime);
+            // 当前位置（从 transform 读取，确保是最新的）
+            Vector2 currentPos = transform.position;
 
-            // ── 垂直移动 + 碰撞 ──
-            velocity = MoveVertical(velocity, velocity.y * deltaTime, deltaTime);
+            // ── 水平碰撞检测 ──
+            HitLeft = false;
+            HitRight = false;
+            WallCollider = null;
 
-            // ── 地面检测（独立于移动） ──
+            if (Mathf.Abs(moveX) > 0.0001f)
+            {
+                float dirX = Mathf.Sign(moveX);
+                float distX = Mathf.Abs(moveX);
+
+                // 使用当前碰撞体的 bounds（考虑 offset 和 size）
+                Vector2 castSize = GetCastSize(horizontal: true);
+                Vector2 castOrigin = currentPos + _collider.offset;
+
+                RaycastHit2D hit = Physics2D.BoxCast(
+                    castOrigin, castSize, 0f,
+                    new Vector2(dirX, 0f),
+                    distX + skinWidth,
+                    groundMask);
+
+                if (hit.collider != null && hit.distance > 0f)
+                {
+                    float maxAllowed = Mathf.Max(0f, hit.distance - skinWidth);
+                    if (maxAllowed < distX)
+                    {
+                        distX = maxAllowed;
+                        velocity.x = 0f;
+
+                        if (dirX < 0f) HitLeft = true;
+                        else HitRight = true;
+                        WallCollider = hit.collider;
+                    }
+                }
+
+                moveX = distX * dirX;
+            }
+
+            // 更新临时位置（水平移动后）
+            currentPos.x += moveX;
+
+            // ── 垂直碰撞检测 ──
+            HitCeiling = false;
+
+            if (Mathf.Abs(moveY) > 0.0001f)
+            {
+                float dirY = Mathf.Sign(moveY);
+                float distY = Mathf.Abs(moveY);
+
+                // 构建碰撞掩码（向下时包含单向平台）
+                LayerMask mask = groundMask;
+                if (dirY < 0f && !FallingThroughPlatform)
+                    mask |= oneWayPlatformMask;
+
+                // 使用更新后的水平位置来做垂直检测
+                Vector2 castSize = GetCastSize(horizontal: false);
+                Vector2 castOrigin = currentPos + _collider.offset;
+
+                RaycastHit2D hit = Physics2D.BoxCast(
+                    castOrigin, castSize, 0f,
+                    new Vector2(0f, dirY),
+                    distY + skinWidth,
+                    mask);
+
+                if (hit.collider != null && hit.distance > 0f)
+                {
+                    float maxAllowed = Mathf.Max(0f, hit.distance - skinWidth);
+                    if (maxAllowed < distY)
+                    {
+                        distY = maxAllowed;
+                        velocity.y = 0f;
+
+                        if (dirY > 0f) HitCeiling = true;
+                    }
+                }
+
+                moveY = distY * dirY;
+            }
+
+            // 更新临时位置（垂直移动后）
+            currentPos.y += moveY;
+
+            // ── 一次性设置最终位置 ──
+            transform.position = new Vector3(currentPos.x, currentPos.y, transform.position.z);
+
+            // ── 独立地面检测 ──
             UpdateGroundCheck();
 
             return velocity;
         }
 
         // ══════════════════════════════════════════════
-        //  水平移动
+        //  碰撞检测辅助
         // ══════════════════════════════════════════════
 
-        private Vector2 MoveHorizontal(Vector2 velocity, float moveX, float deltaTime)
+        /// <summary>
+        /// 获取 BoxCast 使用的尺寸（比碰撞体略小，避免边角误判）。
+        /// horizontal=true 时水平方向保持完整，垂直方向缩小；
+        /// horizontal=false 时反之。
+        /// </summary>
+        private Vector2 GetCastSize(bool horizontal)
         {
-            HitLeft = false;
-            HitRight = false;
-            WallCollider = null;
+            Vector2 size = _collider.size * (Vector2)transform.lossyScale;
+            float shrink = skinWidth * 2f;
 
-            if (Mathf.Abs(moveX) < 0.0001f)
-                return velocity;
-
-            float dirX = Mathf.Sign(moveX);
-            float distance = Mathf.Abs(moveX);
-
-            // BoxCast 检测墙壁
-            Bounds bounds = _collider.bounds;
-            Vector2 origin = bounds.center;
-            Vector2 size = new Vector2(bounds.size.x, bounds.size.y - 0.02f); // 略微缩小避免地面边角误判
-
-            RaycastHit2D hit = Physics2D.BoxCast(
-                origin, size, 0f,
-                Vector2.right * dirX, distance + wallCheckDistance,
-                groundMask);
-
-            if (hit && hit.distance > 0f)
+            if (horizontal)
             {
-                // 修正距离：只走到碰撞点
-                float allowedDist = Mathf.Max(0f, hit.distance - wallCheckDistance);
-                if (allowedDist < distance)
-                {
-                    distance = allowedDist;
-                    velocity.x = 0f;
-
-                    if (dirX < 0) HitLeft = true;
-                    else HitRight = true;
-                    WallCollider = hit.collider;
-                }
+                // 水平检测时垂直方向缩小，避免地面/天花板边角误判
+                size.y = Mathf.Max(size.y - shrink, 0.01f);
+            }
+            else
+            {
+                // 垂直检测时水平方向缩小，避免墙壁边角误判
+                size.x = Mathf.Max(size.x - shrink, 0.01f);
             }
 
-            // 应用水平位移
-            Vector2 pos = _rb.position;
-            pos.x += distance * dirX;
-            _rb.MovePosition(pos);
-
-            return velocity;
-        }
-
-        // ══════════════════════════════════════════════
-        //  垂直移动
-        // ══════════════════════════════════════════════
-
-        private Vector2 MoveVertical(Vector2 velocity, float moveY, float deltaTime)
-        {
-            HitCeiling = false;
-
-            if (Mathf.Abs(moveY) < 0.0001f)
-                return velocity;
-
-            float dirY = Mathf.Sign(moveY);
-            float distance = Mathf.Abs(moveY);
-
-            // 构建碰撞掩码
-            LayerMask mask = groundMask;
-            if (dirY < 0 && !FallingThroughPlatform)
-                mask |= oneWayPlatformMask;
-
-            // BoxCast 检测地面/天花板
-            Bounds bounds = _collider.bounds;
-            Vector2 origin = bounds.center;
-            Vector2 size = new Vector2(bounds.size.x - 0.02f, bounds.size.y); // 略微缩小避免墙角误判
-
-            RaycastHit2D hit = Physics2D.BoxCast(
-                origin, size, 0f,
-                Vector2.up * dirY, distance + groundCheckDistance,
-                mask);
-
-            if (hit && hit.distance > 0f)
-            {
-                float allowedDist = Mathf.Max(0f, hit.distance - groundCheckDistance);
-                if (allowedDist < distance)
-                {
-                    distance = allowedDist;
-                    velocity.y = 0f;
-
-                    if (dirY > 0) HitCeiling = true;
-                }
-            }
-
-            // 应用垂直位移
-            Vector2 pos = _rb.position;
-            pos.y += distance * dirY;
-            _rb.MovePosition(pos);
-
-            return velocity;
+            return size;
         }
 
         // ══════════════════════════════════════════════
@@ -251,7 +270,7 @@ namespace GhostVeil.Physics
 
         /// <summary>
         /// 独立的地面检测，在移动之后执行。
-        /// 使用小距离 BoxCast 向下探测。
+        /// 从碰撞体底部向下做短距离 BoxCast。
         /// </summary>
         private void UpdateGroundCheck()
         {
@@ -262,16 +281,19 @@ namespace GhostVeil.Physics
             if (!FallingThroughPlatform)
                 mask |= oneWayPlatformMask;
 
-            Bounds bounds = _collider.bounds;
-            Vector2 origin = new Vector2(bounds.center.x, bounds.min.y + 0.01f);
-            Vector2 size = new Vector2(bounds.size.x - 0.02f, 0.01f);
+            // 从碰撞体底部中心开始检测
+            Vector2 scale = (Vector2)transform.lossyScale;
+            Vector2 colSize = _collider.size * scale;
+            Vector2 colCenter = (Vector2)transform.position + _collider.offset * scale;
+            Vector2 origin = new Vector2(colCenter.x, colCenter.y - colSize.y * 0.5f + 0.01f);
+            Vector2 boxSize = new Vector2(colSize.x - skinWidth * 2f, 0.02f);
 
             RaycastHit2D hit = Physics2D.BoxCast(
-                origin, size, 0f,
+                origin, boxSize, 0f,
                 Vector2.down, groundCheckDistance,
                 mask);
 
-            if (hit && hit.distance >= 0f)
+            if (hit.collider != null)
             {
                 IsGrounded = true;
                 GroundCollider = hit.collider;
@@ -305,14 +327,16 @@ namespace GhostVeil.Physics
             var col = GetComponent<BoxCollider2D>();
             if (col == null) return;
 
-            Bounds bounds = col.bounds;
+            Vector2 scale = (Vector2)transform.lossyScale;
+            Vector2 colSize = col.size * scale;
+            Vector2 colCenter = (Vector2)transform.position + col.offset * scale;
 
             // 地面检测范围
             Gizmos.color = IsGrounded ? Color.green : Color.red;
-            Vector2 groundOrigin = new Vector2(bounds.center.x, bounds.min.y);
+            Vector2 groundOrigin = new Vector2(colCenter.x, colCenter.y - colSize.y * 0.5f);
             Gizmos.DrawWireCube(
                 groundOrigin + Vector2.down * groundCheckDistance * 0.5f,
-                new Vector3(bounds.size.x - 0.02f, groundCheckDistance, 0f));
+                new Vector3(colSize.x - skinWidth * 2f, groundCheckDistance, 0f));
         }
 #endif
     }

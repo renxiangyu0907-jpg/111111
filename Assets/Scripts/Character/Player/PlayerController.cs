@@ -133,6 +133,13 @@ namespace GhostVeil.Character.Player
 
         protected override void OnStart()
         {
+            // ── 启动诊断日志 ──
+            Debug.Log($"[PlayerController] OnStart — " +
+                      $"Physics={physicsController != null}, " +
+                      $"Input={inputProvider != null}, " +
+                      $"MoveData={moveData != null}, " +
+                      $"Pos={transform.position}", this);
+
             if (physicsController == null) return;
 
             // 初始化地面检测
@@ -143,6 +150,8 @@ namespace GhostVeil.Character.Player
                 WasGroundedLastFrame = true;
                 Velocity = Vector2.zero;
             }
+
+            Debug.Log($"[PlayerController] OnStart complete — IsGrounded={IsGrounded}", this);
         }
 
         // ══════════════════════════════════════════════
