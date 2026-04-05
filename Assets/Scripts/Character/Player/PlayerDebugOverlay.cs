@@ -1,24 +1,15 @@
-// ============================================================================
 // PlayerDebugOverlay.cs — 运行时调试信息显示
-// ============================================================================
-// 挂到 Player 物体上，在游戏画面左上角显示关键状态。
-// 仅在 UNITY_EDITOR 或 Development Build 中可见。
-// 正式发布前删除此脚本或取消勾选 Enable。
-// ============================================================================
 using UnityEngine;
 
 namespace GhostVeil.Character.Player
 {
     public class PlayerDebugOverlay : MonoBehaviour
     {
-        [Tooltip("是否显示调试信息")]
         [SerializeField] private bool enable = true;
 
         private PlayerController _ctrl;
         private GUIStyle _style;
         private string _info = "";
-
-        // 记录上一帧 position.y 以计算帧间变化量
         private float _lastPosY;
 
         private void Awake()
@@ -28,21 +19,21 @@ namespace GhostVeil.Character.Player
 
         private void LateUpdate()
         {
-            if (!enable || _ctrl == null) return;
+            if (!enable || _ctrl == null || _ctrl.Physics == null) return;
 
             float posY = transform.position.y;
             float deltaY = posY - _lastPosY;
             _lastPosY = posY;
 
-            ref var col = ref _ctrl.RaycastCtrl.Collisions;
+            var phys = _ctrl.Physics;
             string stateName = _ctrl.StateMachine?.CurrentStateName ?? "null";
 
             _info = $"State: {stateName}\n"
                   + $"Pos.Y: {posY:F4}  (dY: {deltaY:F5})\n"
                   + $"Vel: ({_ctrl.Velocity.x:F2}, {_ctrl.Velocity.y:F2})\n"
-                  + $"Grounded: {_ctrl.IsGrounded}  Below: {col.Below}\n"
+                  + $"Grounded: {_ctrl.IsGrounded}\n"
                   + $"JumpBuf: {_ctrl.JumpBufferTimer:F3}  Coyote: {_ctrl.CoyoteTimer:F3}\n"
-                  + $"Slope: {col.SlopeAngle:F1}  Climb: {col.ClimbingSlope}  Desc: {col.DescendingSlope}";
+                  + $"HitCeil: {phys.HitCeiling}  HitL: {phys.HitLeft}  HitR: {phys.HitRight}";
         }
 
         private void OnGUI()
