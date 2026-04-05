@@ -166,9 +166,13 @@ namespace GhostVeil.Physics
                     distX + skinWidth,
                     groundMask);
 
-                if (hit.collider != null && hit.distance > 0f)
+                if (hit.collider != null)
                 {
-                    float maxAllowed = Mathf.Max(0f, hit.distance - skinWidth);
+                    // hit.distance == 0 表示起点已在碰撞体内部，不能再往该方向移动
+                    float maxAllowed = (hit.distance <= 0f)
+                        ? 0f
+                        : Mathf.Max(0f, hit.distance - skinWidth);
+
                     if (maxAllowed < distX)
                     {
                         distX = maxAllowed;
@@ -209,9 +213,13 @@ namespace GhostVeil.Physics
                     distY + skinWidth,
                     mask);
 
-                if (hit.collider != null && hit.distance > 0f)
+                if (hit.collider != null)
                 {
-                    float maxAllowed = Mathf.Max(0f, hit.distance - skinWidth);
+                    // hit.distance == 0 表示起点已在碰撞体内部（紧贴地面），不能继续移动
+                    float maxAllowed = (hit.distance <= 0f)
+                        ? 0f
+                        : Mathf.Max(0f, hit.distance - skinWidth);
+
                     if (maxAllowed < distY)
                     {
                         distY = maxAllowed;
