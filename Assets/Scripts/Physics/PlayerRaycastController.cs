@@ -576,7 +576,17 @@ namespace GhostVeil.Physics
             // （浮点精度、微小地形变化等），导致射线朝上未检测地面。
             // 只要角色上一帧在地面且本帧 Below 仍为 false，就补充一次向下探测。
             // 这是 Fall↔Idle 抖动和随机穿地的最终安全网。
-            if (!climbingSmallSlope && _wasGroundedBeforeMove && !_collisions.Below)
+            //
+            // ⚠️ 关键守卫：_velocityOld.y > skinWidth 时不触发。
+            // _velocityOld 保存的是 Move() 入口处的 desiredMovement（未经碰撞修正），
+            // 当玩家跳跃时，_velocityOld.y 为较大正值（如 JumpVelocity * dt），
+            // 此时 _wasGroundedBeforeMove=true、_collisions.Below=false 是正常的，
+            // 如果此时补充探测会找到刚刚离开的地面，将 Below 设为 true，
+            // 导致 ExecuteMovement 将 Velocity.y 清零 → 跳跃被取消。
+            // 只有当原始 movement.y 很小（≤ skinWidth）时才认为是
+            // 接缝漏检或浮点误差，需要安全网介入。
+            if (!climbingSmallSlope && _wasGroundedBeforeMove && !_collisions.Below
+                && _velocityOld.y <= skinWidth)
             {
                 SupplementaryGroundProbe(ref movement);
             }
