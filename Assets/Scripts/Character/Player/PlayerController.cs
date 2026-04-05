@@ -155,6 +155,9 @@ namespace GhostVeil.Character.Player
 
         private float _groundGraceTimer;
 
+        /// <summary>调试用：宽容期剩余时间</summary>
+        public float GroundGraceRemaining => _groundGraceTimer;
+
         /// <summary>
         /// 着地宽容期时长（秒）。
         /// 拼接地面（多个 BoxCollider2D，Edge Radius=0）的接缝处，

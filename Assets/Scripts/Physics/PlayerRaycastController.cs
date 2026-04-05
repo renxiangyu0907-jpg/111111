@@ -140,6 +140,18 @@ namespace GhostVeil.Physics
                 VerticalCollisions(ref movement);
             }
 
+            // ── Step 7.5: 着地时消除垂直微抖动 ──
+            // 当角色在地面上时（Below=true），VerticalCollisions 会将 movement.y
+            // 修正为 (hit.distance - skinWidth) * dirY。由于浮点精度，hit.distance
+            // 可能在 skinWidth 附近微小波动，导致 movement.y 在 ±0.001 之间振荡，
+            // 表现为 position.y 每帧抖动。
+            // 解决方案：着地后，如果垂直位移非常小（< skinWidth），直接钳位为 0。
+            // 跳跃和下落时 |movement.y| 远大于 skinWidth，不受影响。
+            if (_collisions.Below && Mathf.Abs(movement.y) < skinWidth)
+            {
+                movement.y = 0f;
+            }
+
             // ── Step 8: 地面吸附 ──
             // 条件：移动前在地面上、不在上升中、本帧垂直检测没命中地面、未执行台阶攀登
             // 改进：去掉 "必须有水平移动" 的限制。拼接地面的接缝处，即使站立不动，
@@ -627,8 +639,11 @@ namespace GhostVeil.Physics
         /// <summary>
         /// 当主垂直碰撞检测未能命中地面时（射线朝上、接缝漏检等），
         /// 从角色当前位置（含已有 movement 偏移）向下补充探测。
-        /// 使用 groundSnapDistance 作为探测距离，保证足够长。
-        /// 只设置 Below 标记，不修正 movement.y（避免拉扯角色位置）。
+        /// 使用较短的探测距离（skinWidth * 5），仅覆盖"刚好漏检"的范围。
+        /// 
+        /// 功能：
+        ///   1. 设置 Below 标记（防止状态机误判为空中）
+        ///   2. 修正 movement.y（防止角色因未被修正而下沉/上浮，导致下一帧抖动）
         /// </summary>
         private void SupplementaryGroundProbe(ref Vector2 movement)
         {
@@ -636,9 +651,13 @@ namespace GhostVeil.Physics
             if (!_collisions.FallingThroughPlatform)
                 downMask |= oneWayPlatformMask;
 
-            // 探测距离：足够长以覆盖角色底部到地面的间距。
-            // 使用 groundSnapDistance（默认 0.3）确保即使角色距地面较远也能探测到。
-            float probeLength = groundSnapDistance;
+            // 探测距离：只需覆盖"接缝漏检"的范围即可。
+            // 使用 skinWidth * 5（≈ 0.075），足以跨越常见的拼接间隙，
+            // 但不会像 groundSnapDistance（0.3）那样探测到太远的地面。
+            float probeLength = skinWidth * 5f;
+
+            float bestDist = float.MaxValue;
+            RaycastHit2D bestHit = default;
 
             for (int i = 0; i < verticalRayCount; i++)
             {
@@ -655,16 +674,37 @@ namespace GhostVeil.Physics
 
                 Debug.DrawRay(rayOrigin, Vector2.down * probeLength, Color.white);
 
-                if (hit && hit.distance > 0f)
+                if (hit && hit.distance > 0f && hit.distance < bestDist)
                 {
                     float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
                     if (snapAngle <= maxSlopeAngle)
                     {
-                        _collisions.Below = true;
-                        _collisions.GroundCollider = hit.collider;
-                        _collisions.GroundNormal = hit.normal;
-                        return; // 探测到地面即可
+                        bestDist = hit.distance;
+                        bestHit = hit;
                     }
+                }
+            }
+
+            if (bestHit)
+            {
+                _collisions.Below = true;
+                _collisions.GroundCollider = bestHit.collider;
+                _collisions.GroundNormal = bestHit.normal;
+
+                // 修正 movement.y：将角色吸附到探测到的地面，
+                // 防止未修正的 movement.y 导致角色下沉，
+                // 下一帧再被弹回来产生抖动。
+                float correctedY = -(bestDist - skinWidth);
+                // 只有当修正量很小时才应用（大修正说明角色离地面较远，不应强制吸附）
+                if (Mathf.Abs(correctedY) < skinWidth * 3f)
+                {
+                    movement.y = correctedY;
+                }
+                else
+                {
+                    // 距离较远时只设标记，不修正位置
+                    // 但将 movement.y 钳位为 0 防止继续下沉
+                    movement.y = 0f;
                 }
             }
         }

@@ -26,6 +26,7 @@ namespace GhostVeil.Core.StateMachine
         public IState<TContext> CurrentState  => _currentState;
         public IState<TContext> PreviousState => _previousState;
         public int CurrentStateID => _currentState?.StateID ?? -1;
+        public string CurrentStateName => _currentState?.GetType().Name ?? "None";
 
         // ── 事件（可选订阅，用于 UI / 音频 / 日志） ────────
         public event System.Action<int /*oldID*/, int /*newID*/> OnStateChanged;
