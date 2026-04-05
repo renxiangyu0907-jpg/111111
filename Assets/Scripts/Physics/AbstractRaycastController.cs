@@ -34,7 +34,20 @@ namespace GhostVeil.Physics
             public Vector2 BottomLeft, BottomRight;
         }
 
-        protected virtual void Awake() { _boxCollider = GetComponent<BoxCollider2D>(); }
+        protected virtual void Awake()
+        {
+            _boxCollider = GetComponent<BoxCollider2D>();
+
+            // ── 关键：将 BoxCollider2D 设为 Trigger ──
+            // 本控制器使用 transform.Translate 移动角色，不依赖 Unity 物理碰撞。
+            // BoxCollider2D 仅作为射线原点的参考框（读取 bounds）。
+            // 如果不设为 Trigger，BoxCollider2D 会与场景中的其他碰撞体
+            //（如地面的 CompositeCollider2D + Rigidbody2D）产生物理碰撞响应，
+            // 导致角色弹跳、飞天等异常行为。
+            // Trigger 模式下 bounds 完全不受影响，射线系统正常工作。
+            _boxCollider.isTrigger = true;
+        }
+
         protected virtual void Start() { CalculateRaySpacing(); }
 
         public virtual Vector2 Move(Vector2 desiredMovement, bool standingOnPlatform = false)
