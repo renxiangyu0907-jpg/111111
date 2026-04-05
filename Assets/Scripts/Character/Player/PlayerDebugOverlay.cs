@@ -41,7 +41,6 @@ namespace GhostVeil.Character.Player
                   + $"Pos.Y: {posY:F4}  (dY: {deltaY:F5})\n"
                   + $"Vel: ({_ctrl.Velocity.x:F2}, {_ctrl.Velocity.y:F2})\n"
                   + $"Grounded: {_ctrl.IsGrounded}  Below: {col.Below}\n"
-                  + $"Grace: {_ctrl.GroundGraceRemaining:F3}\n"
                   + $"JumpBuf: {_ctrl.JumpBufferTimer:F3}  Coyote: {_ctrl.CoyoteTimer:F3}\n"
                   + $"Slope: {col.SlopeAngle:F1}  Climb: {col.ClimbingSlope}  Desc: {col.DescendingSlope}";
         }

@@ -22,10 +22,22 @@
 //
 //        ← skinWidth →              射线从 bounds 内缩 skinWidth 处发出
 //
-// 管线执行顺序（由 AbstractRaycastController.Move 驱动）：
+// 管线执行顺序（由 Move 方法驱动）：
 //   1. DescendSlope   — 下坡贴地
-//   2. Horizontal     — 撞墙 + 上坡入口检测
-//   3. Vertical       — 落地 / 撞头 + 上坡顶部修正
+//   2. Horizontal     — 撞墙 + 上坡入口检测（含台阶攀登）
+//   3. Vertical       — 纯碰撞修正（撞地/撞头）
+//   4. GroundCheck    — 独立地面探测（与碰撞修正分离）
+//   5. SnapToGround   — 地面吸附（防止走下小坡时飞起来）
+//
+// 关键设计决策：
+//   · GroundCheck 与 VerticalCollisions 完全分离。
+//     VerticalCollisions 只负责修正 movement.y（裁剪碰撞距离），
+//     GroundCheck 独立判定 Below 标记。
+//   · GroundCheck 仅在 movement.y <= 0（下落/站立）时向下探测，
+//     跳跃时（movement.y > 0）直接设 Below=false，
+//     避免首帧向下探测到刚离开的地面导致跳跃被取消。
+//   · 爬坡（ClimbSlope）期间 movement.y > 0 但角色实际在地面上，
+//     GroundCheck 通过检测 ClimbingSlope 标记正确设置 Below=true。
 //
 // 坡道处理核心思路：
 //   · 上坡：水平射线命中倾斜面 → 计算角度 → 将水平速度分解为沿坡面的 X/Y
@@ -93,13 +105,9 @@ namespace GhostVeil.Physics
         }
 
         // ══════════════════════════════════════════════
-        //  覆写 Move：增加台阶攀登 + 地面吸附
+        //  覆写 Move：增加台阶攀登 + 独立地面探测 + 地面吸附
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 覆写基类 Move，增加台阶攀登和地面吸附检测。
-        /// 解决：角色在小地形突起处上下抖动的问题。
-        /// </summary>
         public override Vector2 Move(Vector2 desiredMovement, bool standingOnPlatform = false)
         {
             _wasGroundedBeforeMove = _collisions.Below;
@@ -132,48 +140,47 @@ namespace GhostVeil.Physics
                 didStepUp = _didStepUpThisFrame;
             }
 
-            // ── Step 7: 垂直碰撞检测 ──
-            // 台阶跨越后 movement.y > 0，VerticalCollisions 会检测天花板而非地面，
-            // 导致 Below 被覆写为 false。跳过垂直检测，保留 TryStepUp 设置的 Below=true。
+            // ── Step 7: 垂直碰撞检测（纯碰撞修正） ──
+            // 台阶跨越后跳过垂直检测，保留 TryStepUp 设置的 Below=true。
             if (!didStepUp)
             {
                 VerticalCollisions(ref movement);
             }
 
             // ── Step 7.5: 着地时消除垂直微抖动 ──
-            // 当角色在地面上时（Below=true），VerticalCollisions 会将 movement.y
-            // 修正为 (hit.distance - skinWidth) * dirY。由于浮点精度，hit.distance
-            // 可能在 skinWidth 附近微小波动，导致 movement.y 在 ±0.001 之间振荡，
-            // 表现为 position.y 每帧抖动。
-            // 解决方案：着地后，如果垂直位移非常小（< skinWidth），直接钳位为 0。
-            // 跳跃和下落时 |movement.y| 远大于 skinWidth，不受影响。
+            // 当 Below=true 且垂直位移极小时（浮点噪声），钳位为 0。
             if (_collisions.Below && Mathf.Abs(movement.y) < skinWidth)
             {
                 movement.y = 0f;
             }
 
-            // ── Step 8: 地面吸附 ──
-            // 条件：移动前在地面上、不在上升中、本帧垂直检测没命中地面、未执行台阶攀登
-            // 改进：去掉 "必须有水平移动" 的限制。拼接地面的接缝处，即使站立不动，
-            // 垂直射线也可能全部落入间隙导致 Below=false。此时仍需吸附。
+            // ── Step 8: 独立地面探测 ──
+            // GroundCheck 与碰撞修正完全分离，确保 Below 标记准确。
+            // 仅在非台阶攀登帧执行（台阶攀登已设置了 Below）。
+            if (!didStepUp)
+            {
+                GroundCheck(ref movement);
+            }
+
+            // ── Step 9: 地面吸附 ──
+            // 条件：移动前在地面、本帧地面检测丢失、不在上升中、未台阶攀登
             if (!didStepUp && _wasGroundedBeforeMove && !_collisions.Below
                 && movement.y <= 0.001f)
             {
                 SnapToGround(ref movement);
             }
 
-            // ── Step 9: 应用最终位移 ──
+            // ── Step 10: 应用最终位移 ──
             transform.Translate(movement);
 
-            // ── Step 10: 台阶攀登后补充一次向下探测 ──
-            // 确保跨上台阶后角色紧贴地面，不会悬浮
+            // ── Step 11: 台阶攀登后补充向下探测 ──
             if (didStepUp)
             {
-                UpdateRaycastOrigins(); // 位移后刷新射线原点
+                UpdateRaycastOrigins();
                 SnapToGroundAfterStepUp();
             }
 
-            // ── Step 11: 移动平台强制着地 ──
+            // ── Step 12: 移动平台强制着地 ──
             if (standingOnPlatform)
                 _collisions.Below = true;
 
@@ -181,12 +188,92 @@ namespace GhostVeil.Physics
         }
 
         // ══════════════════════════════════════════════
-        //  公共 API：单向平台穿透触发
+        //  独立地面探测 (GroundCheck)
         // ══════════════════════════════════════════════
 
         /// <summary>
-        /// 外部调用（如"按下+跳跃"时），开始穿透脚下的单向平台。
+        /// 独立于 VerticalCollisions 的地面状态判定。
+        /// 
+        /// 核心规则：
+        ///   · movement.y <= 0（下落/站立）→ 向下发射短射线探测地面
+        ///   · movement.y > 0 且正在爬坡（ClimbingSlope）→ Below = true（坡面行走）
+        ///   · movement.y > 0 且非爬坡（跳跃）→ Below = false（空中）
+        /// 
+        /// 为什么要分离？
+        ///   原来 Below 由 VerticalCollisions 根据 dirY 方向判定，
+        ///   跳跃首帧 movement.y > 0 → dirY = +1 → 射线朝上 → Below=false 是正确的，
+        ///   但 SupplementaryGroundProbe 随后又向下探测到地面 → Below=true → 跳跃被取消。
+        ///   分离后，跳跃帧直接 Below=false，无需安全网，彻底消除误判。
         /// </summary>
+        private void GroundCheck(ref Vector2 movement)
+        {
+            // ── 爬坡中：已由 ClimbSlope 设置 Below=true，无需重复探测 ──
+            if (_collisions.ClimbingSlope)
+                return;
+
+            // ── 下坡中：已由 DescendSlope 设置 Below=true，无需重复探测 ──
+            if (_collisions.DescendingSlope)
+                return;
+
+            // ── 跳跃中（movement.y > 0 且非坡道）→ 明确为空中 ──
+            if (movement.y > skinWidth)
+            {
+                // 不设 Below=false（可能已被 VerticalCollisions 设为 true，
+                // 例如 movement.y 很小时向上射线碰到了天花板附近的面）。
+                // 但在真正跳跃时（movement.y 远大于 skinWidth），
+                // Below 应该为 false。VerticalCollisions 的 dirY=+1
+                // 不会设置 Below=true，所以此处无需操作。
+                return;
+            }
+
+            // ── 站立/下落（movement.y <= skinWidth）→ 向下探测 ──
+            // 探测距离：skinWidth * 3，足以跨越 Tilemap 接缝但不会误判远处地面
+            float probeLength = skinWidth * 3f;
+
+            LayerMask probeMask = collisionMask;
+            if (!_collisions.FallingThroughPlatform)
+                probeMask |= oneWayPlatformMask;
+
+            bool foundGround = false;
+
+            for (int i = 0; i < verticalRayCount; i++)
+            {
+                Vector2 rayOrigin = _raycastOrigins.BottomLeft
+                    + Vector2.right * (_verticalRaySpacing * i + movement.x);
+
+                RaycastHit2D hit = Physics2D.Raycast(
+                    rayOrigin, Vector2.down, probeLength, probeMask);
+
+                Debug.DrawRay(rayOrigin, Vector2.down * probeLength, Color.cyan);
+
+                if (hit && hit.distance > 0f)
+                {
+                    float angle = Vector2.Angle(hit.normal, Vector2.up);
+                    if (angle <= maxSlopeAngle)
+                    {
+                        foundGround = true;
+                        _collisions.GroundNormal = hit.normal;
+                        _collisions.GroundCollider = hit.collider;
+                        break;
+                    }
+                }
+            }
+
+            // 只有在探测到地面时才设 Below=true。
+            // 如果 VerticalCollisions 已经设了 Below=true（向下碰撞），不覆盖。
+            if (foundGround)
+            {
+                _collisions.Below = true;
+            }
+            // 注意：不主动设 Below=false。
+            // 如果 VerticalCollisions 已经设了 Below=true，
+            // 这里不应该覆盖掉（VerticalCollisions 碰到了地面说明确实着地了）。
+        }
+
+        // ══════════════════════════════════════════════
+        //  公共 API：单向平台穿透触发
+        // ══════════════════════════════════════════════
+
         public void StartFallThroughPlatform()
         {
             _collisions.FallingThroughPlatform = true;
@@ -197,24 +284,15 @@ namespace GhostVeil.Physics
         //  水平碰撞检测
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 从角色行进方向一侧发射水平射线组。
-        /// 功能：
-        ///   1. 检测墙壁碰撞 → 修正 movement.x（防止卡入墙体）
-        ///   2. 最底部射线检测坡道 → 触发 ClimbSlope
-        ///   3. 记录 WallCollider 供状态机查询（墙壁滑行等）
-        /// </summary>
         protected override void HorizontalCollisions(ref Vector2 movement)
         {
             float dirX = _collisions.FaceDir;
-            // 射线长度 = 本帧水平位移量 + skinWidth（确保极小位移也能检测到）
             float rayLength = Mathf.Abs(movement.x) + skinWidth;
 
-            // 极小位移时保证最低检测距离（防止贴墙时射线太短漏检）
             if (Mathf.Abs(movement.x) < skinWidth)
                 rayLength = skinWidth * 2f;
 
-            // ── 台阶攀登预检测 ────────────────────────────
+            // ── 台阶攀登预检测 ──
             bool didStepUp = false;
             if (maxStepHeight > 0f && _wasGroundedBeforeMove)
             {
@@ -224,73 +302,48 @@ namespace GhostVeil.Physics
 
             for (int i = 0; i < horizontalRayCount; i++)
             {
-                // 射线起点：从行进方向对侧的底角开始，逐条向上排列
-                //   向右移动 → 从 BottomRight 开始
-                //   向左移动 → 从 BottomLeft 开始
                 Vector2 rayOrigin = (dirX < 0) ? _raycastOrigins.BottomLeft : _raycastOrigins.BottomRight;
                 rayOrigin += Vector2.up * (_horizontalRaySpacing * i);
 
-                // 水平射线不检测单向平台（单向平台只在垂直方向有效）
                 RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.right * dirX, rayLength, collisionMask);
 
-                // ── Debug 可视化 ────────────────────────
                 Debug.DrawRay(rayOrigin, Vector2.right * dirX * rayLength, Color.red);
 
                 if (!hit) continue;
-
-                // ── 命中处理 ────────────────────────────
-
-                // 如果角色已经在碰撞体内部（hit.distance == 0），跳过
-                // 防止从内侧误判碰撞（如穿过移动平台时）
                 if (hit.distance == 0) continue;
 
-                // ── 坡道检测（仅最底部射线） ────────────
                 float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
 
                 if (i == 0 && slopeAngle <= maxSlopeAngle)
                 {
-                    // 如果正在下坡中途突然遇到上坡（坡道衔接），
-                    // 需要先还原下坡修正，再重新计算上坡
                     if (_collisions.DescendingSlope)
                     {
                         _collisions.DescendingSlope = false;
                         movement = _velocityOld;
                     }
 
-                    // 角色与坡面之间的距离（扣除 skinWidth 后才是真实间距）
                     float distanceToSlopeStart = 0f;
                     if (slopeAngle != _collisions.PreviousSlopeAngle)
                     {
-                        // 坡度变化（如从平地进入坡道、从缓坡进入陡坡）
-                        // 先走到坡面起始点，再开始坡道运动
                         distanceToSlopeStart = hit.distance - skinWidth;
                         movement.x -= distanceToSlopeStart * dirX;
                     }
 
                     ClimbSlope(ref movement, slopeAngle, hit.normal);
-
-                    // 走完坡道后把之前扣除的距离补回来
                     movement.x += distanceToSlopeStart * dirX;
                 }
 
-                // ── 非坡道面 或 非最底部射线 → 墙壁碰撞 ──
                 if (!_collisions.ClimbingSlope || slopeAngle > maxSlopeAngle)
                 {
-                    // 修正水平位移：只能走到碰撞点 - skinWidth 的位置
                     movement.x = (hit.distance - skinWidth) * dirX;
-
-                    // 缩短后续射线长度（已经有更近的碰撞了）
                     rayLength = hit.distance;
 
-                    // 如果正在爬坡且撞墙，需要同步修正 Y 分量
-                    // 否则角色会"穿入"墙壁上方
                     if (_collisions.ClimbingSlope)
                     {
                         movement.y = Mathf.Tan(_collisions.SlopeAngle * Mathf.Deg2Rad) * Mathf.Abs(movement.x);
                     }
 
-                    // 标记碰撞方向
-                    _collisions.Left  = (dirX < 0);
+                    _collisions.Left = (dirX < 0);
                     _collisions.Right = (dirX > 0);
                     _collisions.WallCollider = hit.collider;
                 }
@@ -301,26 +354,18 @@ namespace GhostVeil.Physics
         //  台阶攀登 (Step-Up)
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 尝试自动跨越低矮台阶。
-        /// 原理：最底部射线碰到角度 > maxSlopeAngle 的面 (垂直墙) 时，
-        /// 从上方探测台阶顶面，若高度在 maxStepHeight 内则自动跨越。
-        /// </summary>
         private bool TryStepUp(ref Vector2 movement, float dirX, float rayLength)
         {
             _didStepUpThisFrame = false;
 
-            // 1. 最底部水平射线检测
             Vector2 bottomOrigin = (dirX < 0) ? _raycastOrigins.BottomLeft : _raycastOrigins.BottomRight;
             RaycastHit2D bottomHit = Physics2D.Raycast(bottomOrigin, Vector2.right * dirX, rayLength, collisionMask);
 
             if (!bottomHit || bottomHit.distance == 0) return false;
 
             float slopeAngle = Vector2.Angle(bottomHit.normal, Vector2.up);
-            // 只处理超过最大坡度的面（近乎垂直的台阶面）
             if (slopeAngle <= maxSlopeAngle) return false;
 
-            // 2. 从障碍点上方 maxStepHeight 处向前探测
             Vector2 stepCheckOrigin = bottomOrigin + Vector2.up * maxStepHeight;
             RaycastHit2D upperHit = Physics2D.Raycast(
                 stepCheckOrigin, Vector2.right * dirX, rayLength, collisionMask);
@@ -328,12 +373,8 @@ namespace GhostVeil.Physics
             Debug.DrawRay(stepCheckOrigin, Vector2.right * dirX * rayLength, Color.yellow);
 
             if (upperHit && upperHit.distance <= bottomHit.distance + skinWidth)
-            {
-                // 上方也被挡住 -> 不是台阶，是墙壁
                 return false;
-            }
 
-            // 3. 从台阶上方向下发射射线，找到台阶顶面
             float forwardDist = bottomHit.distance;
             Vector2 aboveStepOrigin = bottomOrigin
                 + Vector2.up * (maxStepHeight + skinWidth)
@@ -347,18 +388,13 @@ namespace GhostVeil.Physics
 
             if (!downHit) return false;
 
-            // 4. 计算台阶高度
             float stepHeight = maxStepHeight + skinWidth - downHit.distance;
             if (stepHeight <= 0f || stepHeight > maxStepHeight) return false;
 
-            // 5. 执行台阶跨越：修正 movement
             movement.y = Mathf.Max(movement.y, stepHeight + skinWidth);
-
-            // 6. 限制水平位移，不能超过碰撞点（防止穿墙）
             movement.x = (bottomHit.distance - skinWidth) * dirX
-                         + dirX * skinWidth * 2f; // 多走一点，确保站上台阶顶面
+                         + dirX * skinWidth * 2f;
 
-            // 标记为着地（跨台阶应视为地面行走，不触发 Fall 状态）
             _collisions.Below = true;
             _collisions.GroundNormal = downHit.normal;
             _collisions.GroundCollider = downHit.collider;
@@ -373,10 +409,7 @@ namespace GhostVeil.Physics
 
         /// <summary>
         /// 角色在地面水平移动时，向下搜索地面并吸附。
-        /// 防止在小地形高低差处飞起来导致状态机抖动。
-        ///
-        /// 改进：发射多根射线（而非单根中心射线），
-        /// 防止所有射线恰好落在拼接地形的接缝上而全部漏检。
+        /// 使用多根射线，防止所有射线恰好落在拼接接缝上而全部漏检。
         /// </summary>
         private void SnapToGround(ref Vector2 movement)
         {
@@ -386,12 +419,11 @@ namespace GhostVeil.Physics
             float bestDist = float.MaxValue;
             RaycastHit2D bestHit = default;
 
-            // 使用与垂直碰撞相同的多射线布局，增强抗接缝能力
             for (int i = 0; i < verticalRayCount; i++)
             {
                 Vector2 rayOrigin = _raycastOrigins.BottomLeft
                     + Vector2.right * (_verticalRaySpacing * i)
-                    + movement; // 从移动修正后的位置发射
+                    + movement;
 
                 RaycastHit2D hit = Physics2D.Raycast(
                     rayOrigin, Vector2.down, groundSnapDistance, snapMask);
@@ -411,7 +443,6 @@ namespace GhostVeil.Physics
 
             if (bestHit && bestDist > skinWidth)
             {
-                // 吸附到地面
                 movement.y = -(bestDist - skinWidth);
 
                 _collisions.Below = true;
@@ -422,8 +453,6 @@ namespace GhostVeil.Physics
 
         /// <summary>
         /// 台阶攀登后的地面吸附。
-        /// 跨上台阶后角色可能悬浮在台阶顶面上方，需要向下探测并吸附。
-        /// 在 transform.Translate(movement) 之后调用。
         /// </summary>
         private void SnapToGroundAfterStepUp()
         {
@@ -440,7 +469,6 @@ namespace GhostVeil.Physics
                 float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
                 if (snapAngle <= maxSlopeAngle)
                 {
-                    // 直接移动 transform（已经在 Translate 之后）
                     float snapDist = hit.distance - skinWidth;
                     transform.Translate(Vector2.down * snapDist);
 
@@ -452,166 +480,81 @@ namespace GhostVeil.Physics
         }
 
         // ══════════════════════════════════════════════
-        //  垂直碰撞检测
+        //  垂直碰撞检测（纯碰撞修正）
         // ══════════════════════════════════════════════
 
         /// <summary>
-        /// 从角色顶部或底部发射垂直射线组。
-        /// 功能：
-        ///   1. 检测地面着地 → 修正 movement.y + 标记 Below
-        ///   2. 检测头顶碰撞 → 修正 movement.y + 标记 Above
-        ///   3. 爬坡修正 → 防止坡顶"飞出去"
-        ///   4. 单向平台逻辑 → 向上移动时忽略 / 穿透中忽略
-        ///   5. 记录 GroundCollider
+        /// 垂直碰撞检测 —— 只负责修正 movement.y，不负责设置 Below。
+        /// 
+        /// Below 的设置由独立的 GroundCheck() 负责。
+        /// 此方法仅在碰撞发生时标记 Above（撞头），
+        /// 以及在向下碰撞时暂时标记 Below（用于 Step 7.5 微抖动钳位）。
+        /// 最终 Below 状态由 GroundCheck 决定。
         /// </summary>
         protected override void VerticalCollisions(ref Vector2 movement)
         {
-            // ── 零速度地面探测模式 ────────────────────────
-            // 当 movement.y ≈ 0 时，仍需向下探测以维持 Collisions.Below。
-            // 但此模式下只设置碰撞标记，不修正 movement.y，
-            // 避免因 (hit.distance - skinWidth) 的微小正值导致角色向上抖动。
-            bool isGroundProbeOnly = Mathf.Approximately(movement.y, 0f);
-
-            // ── 关键修正 ────────────────────────────────────
-            // ClimbSlope 可能将 movement.y 设为正值（哪怕只是微小斜面），
-            // 如果角色之前在地面上且 movement.y 很小（坡道爬升量），
-            // 强制进入地面探测模式，避免仅检测天花板而遗漏地面。
-            bool climbingSmallSlope = _collisions.ClimbingSlope
-                                      && movement.y > 0f
-                                      && movement.y < maxStepHeight
-                                      && _wasGroundedBeforeMove;
-
-            float dirY;
-            float rayLength;
-
-            if (isGroundProbeOnly)
+            // 零速时仅做向下探测，不修正 movement
+            if (Mathf.Approximately(movement.y, 0f))
             {
-                dirY = -1f;              // 固定向下探测
-                rayLength = skinWidth * 3f; // 宽松一点的探测距离
-            }
-            else
-            {
-                dirY = Mathf.Sign(movement.y);
-                rayLength = Mathf.Abs(movement.y) + skinWidth;
+                // 纯站立帧：不做碰撞修正，Below 由 GroundCheck 设置
+                return;
             }
 
-            // ── 构建本帧使用的碰撞掩码 ────────────────
-            // 基础掩码 = 实心碰撞层
+            float dirY = Mathf.Sign(movement.y);
+            float rayLength = Mathf.Abs(movement.y) + skinWidth;
+
+            // 碰撞掩码
             LayerMask effectiveMask = collisionMask;
-
-            // 单向平台：仅在向下移动 且 未处于穿透状态时 才检测
             bool includeOneWay = (dirY < 0) && !_collisions.FallingThroughPlatform;
             if (includeOneWay)
                 effectiveMask |= oneWayPlatformMask;
 
             for (int i = 0; i < verticalRayCount; i++)
             {
-                // 射线起点：
-                //   向下（着地检测） → 从 BottomLeft 开始
-                //   向上（撞头检测） → 从 TopLeft 开始
-                // 加上本帧已修正的 movement.x 偏移，确保射线位置与水平修正同步
                 Vector2 rayOrigin = (dirY < 0) ? _raycastOrigins.BottomLeft : _raycastOrigins.TopLeft;
                 rayOrigin += Vector2.right * (_verticalRaySpacing * i + movement.x);
 
                 RaycastHit2D hit = Physics2D.Raycast(rayOrigin, Vector2.up * dirY, rayLength, effectiveMask);
 
-                // ── Debug 可视化 ────────────────────────
                 Debug.DrawRay(rayOrigin, Vector2.up * dirY * rayLength, Color.green);
 
                 if (!hit) continue;
 
-                // ── 单向平台额外校验 ────────────────────
-                // 单向平台只在从上方落下时生效；
-                // 如果角色底部已经在平台表面以下（已经穿入），也忽略
+                // 单向平台额外校验
                 if (IsOneWayPlatform(hit.collider))
                 {
-                    // 向上跳跃时绝对不挡（理论上 effectiveMask 已排除，双重保险）
                     if (dirY > 0) continue;
-
-                    // 角色从内部穿过时跳过（hit.distance == 0 表示原点在碰撞体内）
                     if (hit.distance == 0) continue;
-
-                    // 穿透状态中跳过
                     if (_collisions.FallingThroughPlatform) continue;
                 }
 
-                // ── 命中处理 ────────────────────────────
-
-                if (isGroundProbeOnly)
-                {
-                    // 纯探测模式：只设标记，不修正 movement
-                    // 避免 (hit.distance - skinWidth) 产生微小正值导致角色上下抖动
-                    _collisions.Below = true;
-                    _collisions.GroundCollider = hit.collider;
-                    _collisions.GroundNormal = hit.normal;
-                    return; // 探测到地面即可，无需继续
-                }
-
-                // 修正垂直位移：只能走到碰撞点 - skinWidth
+                // 修正垂直位移
                 movement.y = (hit.distance - skinWidth) * dirY;
-
-                // 缩短后续射线（更近的碰撞优先）
                 rayLength = hit.distance;
 
-                // ── 爬坡中的垂直碰撞修正 ────────────────
-                // 场景：角色正在爬坡，头顶撞到天花板
-                // 此时需要用修正后的 Y 反推 X，防止 X 方向超出
+                // 爬坡中撞头修正
                 if (_collisions.ClimbingSlope)
                 {
                     movement.x = movement.y / Mathf.Tan(_collisions.SlopeAngle * Mathf.Deg2Rad)
                                  * Mathf.Sign(_velocityOld.x);
                 }
 
-                // 标记碰撞方向
-                _collisions.Below = (dirY < 0);
-                _collisions.Above = (dirY > 0);
-
-                // 记录地面碰撞体
+                // 标记碰撞方向（Below 在此仅用于 Step 7.5 微抖动钳位参考）
                 if (dirY < 0)
                 {
+                    _collisions.Below = true;
                     _collisions.GroundCollider = hit.collider;
                     _collisions.GroundNormal = hit.normal;
                 }
+                _collisions.Above = (dirY > 0);
             }
 
-            // ── 爬小坡时补充地面探测 ────────────────────────
-            // ClimbSlope 将 movement.y 设为正值，导致上面只检测了天花板。
-            // 角色实际上还在地面上行走（只是地面微微倾斜），
-            // 需要补充一次向下探测以维持 Below = true。
-            if (climbingSmallSlope && !_collisions.Below)
-            {
-                SupplementaryGroundProbe(ref movement);
-            }
-
-            // ── 通用安全网：之前在地面但本帧 Below 丢失 ─────
-            // 即使不是 ClimbSlope 场景，movement.y 可能因各种原因为正
-            // （浮点精度、微小地形变化等），导致射线朝上未检测地面。
-            // 只要角色上一帧在地面且本帧 Below 仍为 false，就补充一次向下探测。
-            // 这是 Fall↔Idle 抖动和随机穿地的最终安全网。
-            //
-            // ⚠️ 关键守卫：_velocityOld.y > skinWidth 时不触发。
-            // _velocityOld 保存的是 Move() 入口处的 desiredMovement（未经碰撞修正），
-            // 当玩家跳跃时，_velocityOld.y 为较大正值（如 JumpVelocity * dt），
-            // 此时 _wasGroundedBeforeMove=true、_collisions.Below=false 是正常的，
-            // 如果此时补充探测会找到刚刚离开的地面，将 Below 设为 true，
-            // 导致 ExecuteMovement 将 Velocity.y 清零 → 跳跃被取消。
-            // 只有当原始 movement.y 很小（≤ skinWidth）时才认为是
-            // 接缝漏检或浮点误差，需要安全网介入。
-            if (!climbingSmallSlope && _wasGroundedBeforeMove && !_collisions.Below
-                && _velocityOld.y <= skinWidth)
-            {
-                SupplementaryGroundProbe(ref movement);
-            }
-
-            // ── 坡道过渡修正 ────────────────────────────
-            // 场景：角色在爬坡途中，坡度突然变化（缓坡 → 陡坡）
-            // 需要用一根前方射线提前探测新坡面，修正 X 位移
+            // 坡道过渡修正
             if (_collisions.ClimbingSlope)
             {
                 float dirX = Mathf.Sign(movement.x);
                 rayLength = Mathf.Abs(movement.x) + skinWidth;
 
-                // 从当前修正后的 Y 位置发射一根水平射线
                 Vector2 rayOrigin = (dirX < 0 ? _raycastOrigins.BottomLeft : _raycastOrigins.BottomRight)
                                     + Vector2.up * movement.y;
 
@@ -620,8 +563,6 @@ namespace GhostVeil.Physics
                 if (hit)
                 {
                     float newSlopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-
-                    // 坡度确实变化了 → 重新分解速度
                     if (newSlopeAngle != _collisions.SlopeAngle)
                     {
                         movement.x = (hit.distance - skinWidth) * dirX;
@@ -633,113 +574,20 @@ namespace GhostVeil.Physics
         }
 
         // ══════════════════════════════════════════════
-        //  补充向下地面探测
-        // ══════════════════════════════════════════════
-
-        /// <summary>
-        /// 当主垂直碰撞检测未能命中地面时（射线朝上、接缝漏检等），
-        /// 从角色当前位置（含已有 movement 偏移）向下补充探测。
-        /// 使用较短的探测距离（skinWidth * 5），仅覆盖"刚好漏检"的范围。
-        /// 
-        /// 功能：
-        ///   1. 设置 Below 标记（防止状态机误判为空中）
-        ///   2. 修正 movement.y（防止角色因未被修正而下沉/上浮，导致下一帧抖动）
-        /// </summary>
-        private void SupplementaryGroundProbe(ref Vector2 movement)
-        {
-            LayerMask downMask = collisionMask;
-            if (!_collisions.FallingThroughPlatform)
-                downMask |= oneWayPlatformMask;
-
-            // 探测距离：只需覆盖"接缝漏检"的范围即可。
-            // 使用 skinWidth * 5（≈ 0.075），足以跨越常见的拼接间隙，
-            // 但不会像 groundSnapDistance（0.3）那样探测到太远的地面。
-            float probeLength = skinWidth * 5f;
-
-            float bestDist = float.MaxValue;
-            RaycastHit2D bestHit = default;
-
-            for (int i = 0; i < verticalRayCount; i++)
-            {
-                // 射线起点：从移动修正后的底部位置发射
-                Vector2 rayOrigin = _raycastOrigins.BottomLeft
-                    + Vector2.right * (_verticalRaySpacing * i + movement.x);
-
-                // 如果 movement.y > 0（如 ClimbSlope），从偏移后的位置向下
-                if (movement.y > 0f)
-                    rayOrigin += Vector2.up * movement.y;
-
-                RaycastHit2D hit = Physics2D.Raycast(
-                    rayOrigin, Vector2.down, probeLength, downMask);
-
-                Debug.DrawRay(rayOrigin, Vector2.down * probeLength, Color.white);
-
-                if (hit && hit.distance > 0f && hit.distance < bestDist)
-                {
-                    float snapAngle = Vector2.Angle(hit.normal, Vector2.up);
-                    if (snapAngle <= maxSlopeAngle)
-                    {
-                        bestDist = hit.distance;
-                        bestHit = hit;
-                    }
-                }
-            }
-
-            if (bestHit)
-            {
-                _collisions.Below = true;
-                _collisions.GroundCollider = bestHit.collider;
-                _collisions.GroundNormal = bestHit.normal;
-
-                // 修正 movement.y：将角色吸附到探测到的地面，
-                // 防止未修正的 movement.y 导致角色下沉，
-                // 下一帧再被弹回来产生抖动。
-                float correctedY = -(bestDist - skinWidth);
-                // 只有当修正量很小时才应用（大修正说明角色离地面较远，不应强制吸附）
-                if (Mathf.Abs(correctedY) < skinWidth * 3f)
-                {
-                    movement.y = correctedY;
-                }
-                else
-                {
-                    // 距离较远时只设标记，不修正位置
-                    // 但将 movement.y 钳位为 0 防止继续下沉
-                    movement.y = 0f;
-                }
-            }
-        }
-
-        // ══════════════════════════════════════════════
         //  上坡处理
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 将水平速度分解为沿坡面运动的 X/Y 分量。
-        ///
-        /// 物理直觉：
-        ///   · 原始水平速度 = moveDistance（标量）
-        ///   · 沿坡面的 X 分量 = moveDistance * cos(angle)
-        ///   · 沿坡面的 Y 分量 = moveDistance * sin(angle)
-        ///   · 这样保证斜面上的"体感速度"与平地一致（等距映射）
-        ///
-        /// 坡道上的速度策略：
-        ///   · 当前实现 = 等速映射（上坡不减速，保持水平距离一致性）
-        ///   · 若需要"上坡减速"效果，可在这里乘以一个 slopeFriction 系数
-        /// </summary>
         protected override void ClimbSlope(ref Vector2 movement, float slopeAngle, Vector2 slopeNormal)
         {
             float moveDistance = Mathf.Abs(movement.x);
             float climbY = Mathf.Sin(slopeAngle * Mathf.Deg2Rad) * moveDistance;
 
-            // 如果角色当前 Y 速度已经比爬坡 Y 更大（如跳跃中经过坡道），
-            // 则保留跳跃速度，不强制贴地
             if (movement.y > climbY)
                 return;
 
             movement.x = Mathf.Cos(slopeAngle * Mathf.Deg2Rad) * moveDistance * Mathf.Sign(movement.x);
             movement.y = climbY;
 
-            // 爬坡中视为着地（否则状态机会判定为空中）
             _collisions.Below = true;
             _collisions.ClimbingSlope = true;
             _collisions.SlopeAngle = slopeAngle;
@@ -750,23 +598,8 @@ namespace GhostVeil.Physics
         //  下坡处理
         // ══════════════════════════════════════════════
 
-        /// <summary>
-        /// 向下发射一根中心射线探测脚下坡面。
-        /// 若检测到下坡（法线偏离角色行进方向反侧），
-        /// 将水平速度映射为沿坡面下滑的 X/Y 分量，实现"紧贴坡面"效果。
-        ///
-        /// 触发条件：movement.y &lt; 0（重力作用下自然下落）
-        /// 不触发的情况：跳跃上升中、角色被向上弹射
-        ///
-        /// 为什么需要下坡贴地？
-        ///   如果不做处理，角色走下坡时每帧会"微跳"——
-        ///   水平位移把角色推出坡面，然后重力把角色拉回来，
-        ///   导致 grounded 每隔一帧就闪烁，动画和跳跃判定全部抽搐。
-        /// </summary>
         protected override void DescendSlope(ref Vector2 movement)
         {
-            // ── 从角色底部两个角分别向下发射探测射线 ────
-            // 用两侧射线而非中心点，处理坡面边缘更鲁棒
             RaycastHit2D hitLeft = Physics2D.Raycast(
                 _raycastOrigins.BottomLeft, Vector2.down,
                 Mathf.Abs(movement.y) + skinWidth, collisionMask | oneWayPlatformMask);
@@ -775,47 +608,32 @@ namespace GhostVeil.Physics
                 _raycastOrigins.BottomRight, Vector2.down,
                 Mathf.Abs(movement.y) + skinWidth, collisionMask | oneWayPlatformMask);
 
-            // 只有一侧命中 → 可能在坡道边缘，用 SlideDownSlope 处理
             if (hitLeft ^ hitRight)
             {
                 SlideDownSingleHit(ref movement, hitLeft ? hitLeft : hitRight);
                 return;
             }
 
-            // 两侧都没命中 → 没有坡面
             if (!hitLeft && !hitRight)
                 return;
 
-            // ── 两侧都命中 → 取较近的一侧做坡面判定 ────
-            // （如果两侧距离相同，取法线更偏的那个）
             RaycastHit2D primaryHit = (hitLeft.distance <= hitRight.distance) ? hitLeft : hitRight;
             SlideDownMainHit(ref movement, primaryHit);
         }
 
-        // ── 下坡辅助：标准下坡（两侧都有接触） ───────────
         private void SlideDownMainHit(ref Vector2 movement, RaycastHit2D hit)
         {
             float slopeAngle = Vector2.Angle(hit.normal, Vector2.up);
-
-            // 平地（角度 ≈ 0）不算下坡
             if (slopeAngle == 0) return;
-
-            // 角度超过最大可行走坡度 → 不做贴地（角色应滑落，由状态机处理）
             if (slopeAngle > maxSlopeAngle) return;
 
-            // 法线 X 分量的符号 = 坡面朝向
-            // 只有当水平移动方向与坡面倾斜方向一致时才是"下坡"
-            // （朝坡面低处走 = 下坡；朝高处走 = 上坡，上坡由 HorizontalCollisions 处理）
             float normalDirX = Mathf.Sign(hit.normal.x);
-
             if (normalDirX != Mathf.Sign(movement.x) && movement.x != 0)
-                return; // 朝高处走，不是下坡
+                return;
 
             float moveDistance = Mathf.Abs(movement.x);
             float descendY = Mathf.Sin(slopeAngle * Mathf.Deg2Rad) * moveDistance;
 
-            // 检查：如果射线命中距离 > 预期下降量，说明角色还在坡面上方较远处
-            // 此时不应强制贴地（可能是刚从高处落到坡面附近）
             if (hit.distance - skinWidth > descendY)
                 return;
 
@@ -829,7 +647,6 @@ namespace GhostVeil.Physics
             _collisions.GroundCollider = hit.collider;
         }
 
-        // ── 下坡辅助：单侧命中（坡道边缘情况） ──────────
         private void SlideDownSingleHit(ref Vector2 movement, RaycastHit2D hit)
         {
             if (!hit) return;
@@ -838,7 +655,6 @@ namespace GhostVeil.Physics
             if (slopeAngle == 0) return;
             if (slopeAngle > maxSlopeAngle) return;
 
-            // 单侧命中时：法线 X 方向必须与水平移动方向一致才是下坡
             if (Mathf.Sign(hit.normal.x) != Mathf.Sign(movement.x) && movement.x != 0)
                 return;
 
@@ -862,10 +678,8 @@ namespace GhostVeil.Physics
         //  辅助方法
         // ══════════════════════════════════════════════
 
-        /// <summary>判断碰撞体是否属于单向平台层</summary>
         private bool IsOneWayPlatform(Collider2D collider)
         {
-            // 将碰撞体所在 layer 转为 LayerMask 位掩码，与 oneWayPlatformMask 做 AND
             return (oneWayPlatformMask.value & (1 << collider.gameObject.layer)) != 0;
         }
 
@@ -881,10 +695,9 @@ namespace GhostVeil.Physics
             Bounds bounds = _boxCollider.bounds;
             bounds.Expand(skinWidth * -2f);
 
-            Gizmos.color = new Color(1f, 0.5f, 0f, 0.3f); // 半透明橙色
+            Gizmos.color = new Color(1f, 0.5f, 0f, 0.3f);
             Gizmos.DrawWireCube(bounds.center, bounds.size);
 
-            // 绘制射线原点
             Gizmos.color = Color.cyan;
             float radius = 0.02f;
             for (int i = 0; i < horizontalRayCount; i++)
